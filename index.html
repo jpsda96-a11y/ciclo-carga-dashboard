@@ -163,14 +163,6 @@
   .spark-row{ display:flex; align-items:flex-end; gap:3px; height:28px; margin-top:6px; }
   .spark-bar{ width:7px; border-radius:2px 2px 0 0; background:var(--accent); opacity:.55; }
   .spark-bar.zero{ background:var(--ink-faint); opacity:.35; }
-  .diag{
-    margin-top:10px; padding:12px 14px; border-radius:10px; border:1px solid var(--card-border);
-    background:#10141a; font-size:12px; color:var(--ink-muted); font-family:monospace;
-    line-height:1.6; white-space:pre-wrap; word-break:break-word; display:none;
-  }
-  .diag.show{ display:block; }
-  .diag .ok{ color:#4f9d69; }
-  .diag .fail{ color:#c0526a; }
 </style>
 </head>
 <body>
@@ -187,7 +179,6 @@
     </div>
   </header>
   <p class="sync-meta" id="sync-meta"></p>
-  <div class="diag" id="diag-panel"></div>
 
   <div class="divider"></div>
 
@@ -368,9 +359,12 @@ function processCycleRows(rows){
       cycle: header.findIndex(h => h.includes('duração do ciclo') || h.includes('duracao do ciclo')),
       period: header.findIndex(h => h.includes('duração do período') || h.includes('duracao do periodo'))
     };
+    if(idx.name < 0) return updated; // não conseguimos identificar a coluna do nome — não mexe na lista atual
+
+    const validNames = new Set();
     for(let i = 1; i < rows.length; i++){
       const r = rows[i];
-      if(!r || idx.name < 0) continue;
+      if(!r) continue;
       const name = (r[idx.name] || '').trim();
       if(!name) continue;
       const key = name.toLowerCase();
@@ -378,16 +372,22 @@ function processCycleRows(rows){
       const cycleLength = idx.cycle >= 0 ? parseInt(r[idx.cycle], 10) : NaN;
       const periodLength = idx.period >= 0 ? parseInt(r[idx.period], 10) : NaN;
       if(startIso && !isNaN(cycleLength) && !isNaN(periodLength)){
+        validNames.add(key);
         let a = athletes.find(x => x.name.trim().toLowerCase() === key);
         if(!a){
-          a = { id: 'a' + Date.now() + Math.random().toString(36).slice(2,6), name, lastStart: startIso, cycleLength, periodLength };
+          a = { id: 'a' + Date.now() + Math.random().toString(36).slice(2,6), name, lastStart: startIso, cycleLength, periodLength, fromSheet: true };
           athletes.push(a);
         }else{
           a.lastStart = startIso; a.cycleLength = cycleLength; a.periodLength = periodLength;
+          a.fromSheet = true; // a Sheet passa a "adotar" este registo (mesmo que tenha sido criado manualmente antes)
         }
         updated++;
       }
     }
+    // A Sheet é a fonte de verdade só para quem veio dela: remove atletas com fromSheet=true
+    // cuja linha já não existe (foi apagada no Excel/Sheets). Atletas adicionadas manualmente
+    // que nunca apareceram na Sheet (fromSheet nunca ficou true) ficam sempre protegidas.
+    athletes = athletes.filter(a => !a.fromSheet || validNames.has(a.name.trim().toLowerCase()));
   }
   return updated;
 }
@@ -424,59 +424,31 @@ function processSymptomsRows(rows){
   return updated;
 }
 
-function renderDiag(diag){
-  const el = document.getElementById('diag-panel');
-  if(!el) return;
-  const line = (label, d) => {
-    if(d.error) return `<span class="fail">✕ ${label}: ${escapeHtml(d.error)}</span>`;
-    return `<span class="ok">✓ ${label}: ${d.rows} linha(s) de dados, ${d.matched} válida(s)</span>`;
-  };
-  el.innerHTML = `${line('Ciclo', diag.cycle)}\n${line('Sintomas', diag.symptoms)}\nÚltima tentativa: ${new Date().toLocaleString('pt-PT')}`;
-  el.classList.add('show');
-}
-
 async function syncFromForm(){
   const btn = document.getElementById('sync-btn');
   const original = btn.textContent;
   btn.textContent = 'A sincronizar…';
   btn.disabled = true;
   let cycleUpdated = 0, symptomsUpdated = 0;
-  const diag = { cycle: {}, symptoms: {} };
   try{
-    // 1) Formulário de configuração do ciclo (preenchido quando o período começa)
+    // 1) Configuração do ciclo (preenchido quando o período começa)
     try{
       const rows = await fetchCSV(CYCLE_CSV_URL);
-      diag.cycle.rows = Math.max(0, rows.length - 1);
       cycleUpdated = processCycleRows(rows);
-      diag.cycle.matched = cycleUpdated;
-    }catch(e){
-      diag.cycle.error = (e && e.message) ? e.message : String(e);
-    }
+    }catch(e){ /* falha nesta fonte não bloqueia a outra */ }
 
-    // 2) Formulário diário de sintomas (preenchido no dia a dia)
+    // 2) Registo diário de sintomas
     try{
       const rows = await fetchCSV(SYMPTOMS_CSV_URL);
-      diag.symptoms.rows = Math.max(0, rows.length - 1);
       symptomsUpdated = processSymptomsRows(rows);
-      diag.symptoms.matched = symptomsUpdated;
-    }catch(e){
-      diag.symptoms.error = (e && e.message) ? e.message : String(e);
-    }
+    }catch(e){ /* falha nesta fonte não bloqueia a outra */ }
 
-    renderDiag(diag);
     await saveData();
     lastSync = Date.now();
     await saveSyncState();
     render();
     renderSyncMeta();
-    if(cycleUpdated || symptomsUpdated){
-      showToast('Sincronizado com sucesso.');
-    }else{
-      showToast('Sincronizado, mas sem dados novos.');
-    }
   }catch(e){
-    diag.cycle.error = diag.cycle.error || 'erro geral: ' + (e && e.message ? e.message : String(e));
-    renderDiag(diag);
     showToast('Erro ao sincronizar: ' + (e && e.message ? e.message : String(e)));
   }finally{
     btn.textContent = original;
