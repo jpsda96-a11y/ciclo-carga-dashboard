@@ -1,0 +1,786 @@
+<!DOCTYPE html>
+<html lang="pt-PT">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ciclo &amp; Carga — Monitorização de treino</title>
+<style>
+  :root{
+    --bg: #12161d;
+    --card: #1a2029;
+    --card-border: #262d38;
+    --ink: #edf0f4;
+    --ink-muted: #8a92a1;
+    --ink-faint: #5b6373;
+    --accent: #4fc7be;
+    --accent-ink: #0a2320;
+
+    --menstrual: #c04a63;
+    --menstrual-bg: #2a1620;
+    --follicular: #4f9d69;
+    --follicular-bg: #142518;
+    --ovulacao: #e2ac3c;
+    --ovulacao-bg: #2b2211;
+    --luteal: #c67c3d;
+    --luteal-bg: #2a1d10;
+  }
+  *{ box-sizing: border-box; }
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--ink);
+    font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    padding: 32px 24px 80px;
+  }
+  .wrap{ max-width: 980px; margin: 0 auto; }
+
+  header{
+    display:flex; justify-content:space-between; align-items:flex-end;
+    gap:16px; margin-bottom: 8px; flex-wrap: wrap;
+  }
+  .eyebrow{
+    font-size:12px; letter-spacing:.14em; text-transform:uppercase;
+    color:var(--accent); font-weight:700; margin:0 0 6px;
+  }
+  h1{
+    font-size: 30px; letter-spacing:-0.01em; margin:0;
+    font-weight:800;
+  }
+  .sub{ color:var(--ink-muted); font-size:14px; margin:6px 0 0; max-width:520px; }
+
+  button{
+    font-family:inherit; cursor:pointer; border:none; border-radius:10px;
+  }
+  .btn-primary{
+    background:var(--accent); color:var(--accent-ink); font-weight:700;
+    padding:12px 20px; font-size:14px; letter-spacing:.01em;
+    box-shadow: 0 0 0 0 transparent;
+  }
+  .btn-primary:hover{ filter:brightness(1.06); }
+  .btn-ghost{
+    background:transparent; color:var(--ink-muted); border:1px solid var(--card-border);
+    padding:9px 14px; font-size:13px;
+  }
+  .btn-ghost:hover{ color:var(--ink); border-color:var(--ink-faint); }
+
+  .divider{ height:1px; background:var(--card-border); margin: 24px 0 28px; }
+
+  .grid{
+    display:grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 18px;
+  }
+
+  .card{
+    background:var(--card); border:1px solid var(--card-border);
+    border-radius:16px; padding:20px; position:relative;
+  }
+  .card-top{ display:flex; justify-content:space-between; align-items:flex-start; }
+  .name{ font-size:17px; font-weight:700; margin:0; }
+  .meta{ color:var(--ink-faint); font-size:12px; margin:3px 0 0; }
+  .icon-btn{
+    background:transparent; color:var(--ink-faint); font-size:16px;
+    padding:4px 6px; border-radius:6px;
+  }
+  .icon-btn:hover{ color:var(--ink); background:rgba(255,255,255,.05); }
+
+  .ring-row{ display:flex; align-items:center; gap:18px; margin-top:14px; }
+  .ring-wrap{ position:relative; width:104px; height:104px; flex-shrink:0; }
+  .ring-day{
+    position:absolute; inset:0; display:flex; flex-direction:column;
+    align-items:center; justify-content:center;
+  }
+  .ring-day .n{ font-size:22px; font-weight:800; line-height:1; }
+  .ring-day .lbl{ font-size:9px; color:var(--ink-faint); letter-spacing:.08em; text-transform:uppercase; margin-top:3px; }
+
+  .phase-col{ flex:1; min-width:0; }
+  .phase-badge{
+    display:inline-block; font-size:11px; font-weight:700; letter-spacing:.04em;
+    text-transform:uppercase; padding:4px 10px; border-radius:999px; margin-bottom:8px;
+  }
+  .rec{ font-size:13px; color:var(--ink-muted); line-height:1.5; margin:0; }
+
+  .legend{ display:flex; gap:14px; margin-top:16px; flex-wrap:wrap; }
+  .legend span{ display:inline-flex; align-items:center; gap:6px; font-size:11px; color:var(--ink-faint); }
+  .dot{ width:8px; height:8px; border-radius:50%; display:inline-block; }
+
+  .empty{
+    text-align:center; padding: 60px 20px; color:var(--ink-faint);
+    border:1px dashed var(--card-border); border-radius:16px;
+  }
+  .empty p{ margin: 6px 0 18px; font-size:14px; }
+
+  .overlay{
+    position:fixed; inset:0; background:rgba(6,8,11,.68);
+    display:flex; align-items:center; justify-content:center; padding:20px; z-index:50;
+  }
+  .modal{
+    background:var(--card); border:1px solid var(--card-border); border-radius:16px;
+    width:100%; max-width:420px; padding:24px; max-height:90vh; overflow-y:auto;
+  }
+  .modal h2{ font-size:18px; margin:0 0 4px; }
+  .modal .msub{ color:var(--ink-muted); font-size:13px; margin:0 0 20px; }
+  .field{ margin-bottom:16px; }
+  .field label{ display:block; font-size:12px; color:var(--ink-muted); margin-bottom:6px; font-weight:600; }
+  .field input{
+    width:100%; background:#10141a; border:1px solid var(--card-border); color:var(--ink);
+    padding:10px 12px; border-radius:9px; font-size:14px; font-family:inherit;
+  }
+  .field input:focus{ outline:none; border-color:var(--accent); }
+  .field-row{ display:flex; gap:12px; }
+  .field-row .field{ flex:1; }
+  .modal-actions{ display:flex; gap:10px; margin-top:20px; }
+  .modal-actions button{ flex:1; padding:11px; font-size:14px; font-weight:600; }
+  .danger-link{
+    background:none; border:none; color:#c0526a; font-size:12px; margin-top:14px;
+    padding:0; text-decoration:underline; cursor:pointer;
+  }
+
+  .disclaimer{
+    margin-top:32px; font-size:12px; color:var(--ink-faint); line-height:1.6;
+    border-top:1px solid var(--card-border); padding-top:16px;
+  }
+  .toast{
+    position:fixed; bottom:24px; left:50%; transform:translateX(-50%);
+    background:var(--card); border:1px solid var(--card-border); color:var(--ink);
+    padding:10px 18px; border-radius:10px; font-size:13px; opacity:0; pointer-events:none;
+    transition:opacity .25s ease; z-index:60;
+  }
+  .toast.show{ opacity:1; }
+  .sync-meta{ color:var(--ink-faint); font-size:12px; margin:8px 0 0; }
+  .history{
+    margin-top:14px; padding-top:12px; border-top:1px solid var(--card-border);
+    font-size:12px; color:var(--ink-muted); line-height:1.5;
+  }
+  .history b{ color:var(--ink); font-weight:600; }
+  .source-tag{
+    font-size:10px; color:var(--accent); font-weight:700; letter-spacing:.04em;
+    text-transform:uppercase; margin-left:8px;
+  }
+  .warn-badge{
+    display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:700;
+    color:#e2ac3c; background:#2b2211; padding:4px 9px; border-radius:999px; margin-top:8px;
+  }
+  .spark-row{ display:flex; align-items:flex-end; gap:3px; height:28px; margin-top:6px; }
+  .spark-bar{ width:7px; border-radius:2px 2px 0 0; background:var(--accent); opacity:.55; }
+  .spark-bar.zero{ background:var(--ink-faint); opacity:.35; }
+  .diag{
+    margin-top:10px; padding:12px 14px; border-radius:10px; border:1px solid var(--card-border);
+    background:#10141a; font-size:12px; color:var(--ink-muted); font-family:monospace;
+    line-height:1.6; white-space:pre-wrap; word-break:break-word; display:none;
+  }
+  .diag.show{ display:block; }
+  .diag .ok{ color:#4f9d69; }
+  .diag .fail{ color:#c0526a; }
+  .upload-row{ display:flex; gap:10px; margin-top:14px; flex-wrap:wrap; }
+  .upload-btn{
+    position:relative; overflow:hidden; display:inline-flex; align-items:center;
+    background:transparent; color:var(--ink-muted); border:1px dashed var(--card-border);
+    padding:9px 14px; font-size:13px; border-radius:10px; cursor:pointer;
+  }
+  .upload-btn:hover{ color:var(--ink); border-color:var(--accent); }
+  .upload-btn input[type="file"]{
+    position:absolute; inset:0; opacity:0; cursor:pointer; width:100%; height:100%;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <p class="eyebrow">Ciclo &amp; Carga</p>
+      <h1>Monitorização do ciclo menstrual</h1>
+      <p class="sub">Acompanha em que fase do ciclo cada atleta se encontra para ajustar volume e intensidade de treino.</p>
+    </div>
+    <div style="display:flex; gap:10px; align-items:center;">
+      <button class="btn-ghost" id="sync-btn" onclick="syncFromForm()">⟳ Sincronizar (2 formulários)</button>
+      <button class="btn-primary" onclick="openModal()">+ Adicionar atleta</button>
+    </div>
+  </header>
+  <p class="sync-meta" id="sync-meta"></p>
+  <div class="diag" id="diag-panel"></div>
+
+  <div class="upload-row">
+    <label class="upload-btn">
+      📄 Carregar CSV do ciclo
+      <input type="file" accept=".csv,text/csv" id="file-cycle" onchange="loadCycleFile(event)">
+    </label>
+    <label class="upload-btn">
+      📄 Carregar CSV de sintomas
+      <input type="file" accept=".csv,text/csv" id="file-symptoms" onchange="loadSymptomsFile(event)">
+    </label>
+  </div>
+  <p class="sub" style="margin-top:8px; font-size:12px;">
+    Se a sincronização automática não funcionar (bloqueio de rede do ambiente), faz o download do CSV de cada Sheet (abre o link publicado — o browser transfere o ficheiro) e carrega-o aqui.
+  </p>
+
+  <div class="divider"></div>
+
+  <div id="content"></div>
+
+  <div class="disclaimer">
+    Nota: os cálculos assumem um ciclo regular com base na data de início do último período e na duração média indicada. Existe variação individual — usa isto como apoio à decisão, em conjunto com o feedback direto de cada atleta, e não como diagnóstico médico. Os dados vêm de dois Google Forms partilhados com as atletas: um para configurar o ciclo (preenchido quando o período começa) e outro para o registo diário de sintomas. Se a sincronização automática falhar (bloqueio de rede do ambiente), usa o carregamento manual do CSV acima. Os dados guardados neste dashboard são partilhados entre quem tiver acesso a este link.
+  </div>
+</div>
+
+<div id="modal-root"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+const PHASES = {
+  menstrual: { label: 'Menstrual', color: 'var(--menstrual)', bg: 'var(--menstrual-bg)',
+    rec: 'Carga baixa a moderada. Prioriza técnica, mobilidade e trabalho aeróbio leve. Atenção a energia, hidratação e ferro.' },
+  follicular: { label: 'Folicular', color: 'var(--follicular)', bg: 'var(--follicular-bg)',
+    rec: 'Janela de maior capacidade de esforço. Boa altura para intensidade alta, força e novas aprendizagens técnicas.' },
+  ovulacao: { label: 'Ovulação', color: 'var(--ovulacao)', bg: 'var(--ovulacao-bg)',
+    rec: 'Pico de desempenho, mas maior frouxidão ligamentar. Mantém intensidade, reforça aquecimento em saltos e mudanças de direção.' },
+  luteal: { label: 'Lútea', color: 'var(--luteal)', bg: 'var(--luteal-bg)',
+    rec: 'Energia pode oscilar, sobretudo no fim da fase. Reduz gradualmente o volume, cuida do sono e da alimentação.' }
+};
+
+const CYCLE_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRxOL9gP9q2i3x8QO-_7TzMZTWxTBf3g-nsnPmcXOAdgu0N8nd0J6vqDb8pODiAVdSvfMPTTg43nnLN/pub?output=csv';
+const SYMPTOMS_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQ4IFQLQbvE8LjNU8QMDBOseYUgMzPiQBUJw0M9PSbpNz5n3Xvxb6xwy6zuUz-yFPjMPDv2jjZzURu6/pub?output=csv';
+const STALE_DAYS = 3;
+
+let athletes = [];
+let editingId = null;
+let history = {}; // name (lowercase) -> array of { symptoms, notes, timestamp, count }
+let lastSync = null;
+
+function parseTimestamp(str){
+  if(!str) return null;
+  const m = str.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})[, ]+(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if(!m) return null;
+  let a = +m[1], b = +m[2], y = +m[3], hh = +m[4], mm = +m[5], ss = +(m[6]||0);
+  let day, month;
+  if(a > 12){ day = a; month = b; }
+  else if(b > 12){ day = b; month = a; }
+  else { day = a; month = b; } // default day-first (locale pt)
+  return new Date(y, month - 1, day, hh, mm, ss);
+}
+
+function daysSince(date){
+  if(!date) return null;
+  const now = new Date();
+  return Math.floor((now - date) / 86400000);
+}
+
+// Camada de armazenamento portátil: usa window.storage quando corre dentro do Claude,
+// e cai automaticamente para localStorage quando corre isolado (ex: Vercel, GitHub Pages).
+const hasClaudeStorage = typeof window !== 'undefined' && window.storage && typeof window.storage.get === 'function';
+
+async function storageGet(key){
+  if(hasClaudeStorage){
+    return window.storage.get(key, true);
+  }
+  try{
+    const raw = localStorage.getItem(key);
+    return raw !== null ? { key, value: raw } : null;
+  }catch(e){
+    return null;
+  }
+}
+
+async function storageSet(key, value){
+  if(hasClaudeStorage){
+    return window.storage.set(key, value, true);
+  }
+  try{
+    localStorage.setItem(key, value);
+    return { key, value };
+  }catch(e){
+    return null;
+  }
+}
+
+async function loadData(){
+  try{
+    const res = await storageGet('ciclo-atletas');
+    const raw = res && res.value ? JSON.parse(res.value) : [];
+    // Defende contra registos corrompidos/incompletos que possam ter ficado de testes anteriores
+    athletes = Array.isArray(raw) ? raw.filter(a =>
+      a && typeof a.name === 'string' && a.name.trim() &&
+      typeof a.lastStart === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(a.lastStart) &&
+      Number.isFinite(a.cycleLength) && a.cycleLength > 0 &&
+      Number.isFinite(a.periodLength) && a.periodLength > 0
+    ) : [];
+  }catch(e){
+    athletes = [];
+  }
+  try{
+    const res2 = await storageGet('ciclo-sync');
+    if(res2 && res2.value){
+      const parsed = JSON.parse(res2.value);
+      history = parsed.history || {};
+      lastSync = parsed.lastSync || null;
+    }
+  }catch(e){
+    history = {};
+    lastSync = null;
+  }
+  try{
+    render();
+  }catch(e){
+    showToast('Erro ao mostrar dados: ' + (e && e.message ? e.message : String(e)));
+  }
+  renderSyncMeta();
+}
+
+async function saveSyncState(){
+  try{
+    await storageSet('ciclo-sync', JSON.stringify({ history, lastSync }));
+  }catch(e){
+    // non-fatal
+  }
+}
+
+function renderSyncMeta(){
+  const el = document.getElementById('sync-meta');
+  if(!el) return;
+  el.textContent = lastSync
+    ? `Última sincronização: ${new Date(lastSync).toLocaleString('pt-PT')}`
+    : 'Ainda não sincronizado com o Google Forms.';
+}
+
+// Minimal CSV parser that handles quoted fields containing commas/newlines
+function parseCSV(text){
+  const rows = [];
+  let row = [], field = '', inQuotes = false;
+  for(let i = 0; i < text.length; i++){
+    const c = text[i], next = text[i+1];
+    if(inQuotes){
+      if(c === '"' && next === '"'){ field += '"'; i++; }
+      else if(c === '"'){ inQuotes = false; }
+      else { field += c; }
+    }else{
+      if(c === '"'){ inQuotes = true; }
+      else if(c === ','){ row.push(field); field = ''; }
+      else if(c === '\r'){ /* skip */ }
+      else if(c === '\n'){ row.push(field); rows.push(row); row = []; field = ''; }
+      else { field += c; }
+    }
+  }
+  if(field.length || row.length){ row.push(field); rows.push(row); }
+  return rows.filter(r => r.length > 1 || (r.length === 1 && r[0] !== ''));
+}
+
+function parseFormDate(str){
+  if(!str) return null;
+  str = str.trim();
+  // ISO: YYYY-MM-DD
+  let m = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if(m) return `${m[1]}-${m[2]}-${m[3]}`;
+  // DD/MM/YYYY
+  m = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if(m) return `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;
+  return null;
+}
+
+async function fetchCSV(url){
+  const res = await fetch(url, { cache: 'no-store' });
+  if(!res.ok) throw new Error('fetch failed: ' + url);
+  const text = await res.text();
+  return parseCSV(text);
+}
+
+function readFileAsCSV(file){
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(parseCSV(String(reader.result)));
+    reader.onerror = () => reject(new Error('Não foi possível ler o ficheiro.'));
+    reader.readAsText(file, 'utf-8');
+  });
+}
+
+function processCycleRows(rows){
+  let updated = 0;
+  if(rows.length >= 2){
+    const header = rows[0].map(h => h.trim().toLowerCase());
+    const idx = {
+      name: header.findIndex(h => h.includes('nome')),
+      start: header.findIndex(h => h.includes('início do último período') || h.includes('inicio do ultimo periodo')),
+      cycle: header.findIndex(h => h.includes('duração do ciclo') || h.includes('duracao do ciclo')),
+      period: header.findIndex(h => h.includes('duração do período') || h.includes('duracao do periodo'))
+    };
+    for(let i = 1; i < rows.length; i++){
+      const r = rows[i];
+      if(!r || idx.name < 0) continue;
+      const name = (r[idx.name] || '').trim();
+      if(!name) continue;
+      const key = name.toLowerCase();
+      const startIso = idx.start >= 0 ? parseFormDate(r[idx.start]) : null;
+      const cycleLength = idx.cycle >= 0 ? parseInt(r[idx.cycle], 10) : NaN;
+      const periodLength = idx.period >= 0 ? parseInt(r[idx.period], 10) : NaN;
+      if(startIso && !isNaN(cycleLength) && !isNaN(periodLength)){
+        let a = athletes.find(x => x.name.trim().toLowerCase() === key);
+        if(!a){
+          a = { id: 'a' + Date.now() + Math.random().toString(36).slice(2,6), name, lastStart: startIso, cycleLength, periodLength };
+          athletes.push(a);
+        }else{
+          a.lastStart = startIso; a.cycleLength = cycleLength; a.periodLength = periodLength;
+        }
+        updated++;
+      }
+    }
+  }
+  return updated;
+}
+
+function processSymptomsRows(rows){
+  let updated = 0;
+  if(rows.length >= 2){
+    const header = rows[0].map(h => h.trim().toLowerCase());
+    const idx = {
+      timestamp: header.findIndex(h => h.includes('carimbo')),
+      name: header.findIndex(h => h.includes('nome')),
+      symptoms: header.findIndex(h => h.includes('sintomas')),
+      notes: header.findIndex(h => h.includes('notas'))
+    };
+    history = {}; // rebuild fully from this CSV each time
+    for(let i = 1; i < rows.length; i++){
+      const r = rows[i];
+      if(!r || idx.name < 0) continue;
+      const name = (r[idx.name] || '').trim();
+      if(!name) continue;
+      const key = name.toLowerCase();
+      const symptoms = idx.symptoms >= 0 ? (r[idx.symptoms] || '').trim() : '';
+      const notes = idx.notes >= 0 ? (r[idx.notes] || '').trim() : '';
+      const timestamp = idx.timestamp >= 0 ? r[idx.timestamp] : '';
+      if(symptoms || notes){
+        const count = (!symptoms || /sem sintomas/i.test(symptoms)) ? 0 : symptoms.split(',').length;
+        if(!history[key]) history[key] = [];
+        history[key].push({ symptoms, notes, timestamp, count });
+        if(history[key].length > 8) history[key] = history[key].slice(-8);
+        updated++;
+      }
+    }
+  }
+  return updated;
+}
+
+async function loadCycleFile(event){
+  const file = event.target.files[0];
+  if(!file) return;
+  try{
+    const rows = await readFileAsCSV(file);
+    const updated = processCycleRows(rows);
+    await saveData();
+    render();
+    showToast(updated ? `Ficheiro carregado (${updated} atleta(s) atualizadas).` : 'Ficheiro carregado, mas sem linhas válidas.');
+  }catch(e){
+    showToast('Erro ao carregar o ficheiro: ' + (e && e.message ? e.message : String(e)));
+  }finally{
+    event.target.value = '';
+  }
+}
+
+async function loadSymptomsFile(event){
+  const file = event.target.files[0];
+  if(!file) return;
+  try{
+    const rows = await readFileAsCSV(file);
+    const updated = processSymptomsRows(rows);
+    await saveSyncState();
+    render();
+    showToast(updated ? `Ficheiro carregado (${updated} registo(s) de sintomas).` : 'Ficheiro carregado, mas sem linhas válidas.');
+  }catch(e){
+    showToast('Erro ao carregar o ficheiro: ' + (e && e.message ? e.message : String(e)));
+  }finally{
+    event.target.value = '';
+  }
+}
+
+function renderDiag(diag){
+  const el = document.getElementById('diag-panel');
+  if(!el) return;
+  const line = (label, d) => {
+    if(d.error) return `<span class="fail">✕ ${label}: ${escapeHtml(d.error)}</span>`;
+    return `<span class="ok">✓ ${label}: ${d.rows} linha(s) de dados, ${d.matched} válida(s)</span>`;
+  };
+  el.innerHTML = `${line('Formulário 1 (ciclo)', diag.cycle)}\n${line('Formulário 2 (sintomas)', diag.symptoms)}\nÚltima tentativa: ${new Date().toLocaleString('pt-PT')}`;
+  el.classList.add('show');
+}
+
+async function syncFromForm(){
+  const btn = document.getElementById('sync-btn');
+  const original = btn.textContent;
+  btn.textContent = 'A sincronizar…';
+  btn.disabled = true;
+  let cycleUpdated = 0, symptomsUpdated = 0;
+  const diag = { cycle: {}, symptoms: {} };
+  try{
+    // 1) Formulário de configuração do ciclo (preenchido quando o período começa)
+    try{
+      const rows = await fetchCSV(CYCLE_CSV_URL);
+      diag.cycle.rows = Math.max(0, rows.length - 1);
+      cycleUpdated = processCycleRows(rows);
+      diag.cycle.matched = cycleUpdated;
+    }catch(e){
+      diag.cycle.error = (e && e.message) ? e.message : String(e);
+    }
+
+    // 2) Formulário diário de sintomas (preenchido no dia a dia)
+    try{
+      const rows = await fetchCSV(SYMPTOMS_CSV_URL);
+      diag.symptoms.rows = Math.max(0, rows.length - 1);
+      symptomsUpdated = processSymptomsRows(rows);
+      diag.symptoms.matched = symptomsUpdated;
+    }catch(e){
+      diag.symptoms.error = (e && e.message) ? e.message : String(e);
+    }
+
+    renderDiag(diag);
+    await saveData();
+    lastSync = Date.now();
+    await saveSyncState();
+    render();
+    renderSyncMeta();
+    if(cycleUpdated || symptomsUpdated){
+      showToast(`Sincronizado (${cycleUpdated} config. de ciclo, ${symptomsUpdated} registo(s) de sintomas).`);
+    }else{
+      showToast('Sincronizado, mas sem dados novos — vê o painel de diagnóstico abaixo.');
+    }
+  }catch(e){
+    diag.cycle.error = diag.cycle.error || 'erro geral: ' + (e && e.message ? e.message : String(e));
+    renderDiag(diag);
+    showToast('Erro ao sincronizar: ' + (e && e.message ? e.message : String(e)));
+  }finally{
+    btn.textContent = original;
+    btn.disabled = false;
+  }
+}
+
+async function saveData(){
+  try{
+    await storageSet('ciclo-atletas', JSON.stringify(athletes));
+  }catch(e){
+    showToast('Não foi possível guardar. Tenta novamente.');
+  }
+}
+
+function showToast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(()=> t.classList.remove('show'), 2200);
+}
+
+function daysBetween(dateStr){
+  const start = new Date(dateStr + 'T00:00:00');
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  return Math.floor((today - start) / 86400000);
+}
+
+function computeStatus(a){
+  const cycleLen = a.cycleLength;
+  const menLen = a.periodLength;
+  const diff = daysBetween(a.lastStart);
+  const dayInCycle = ((diff % cycleLen) + cycleLen) % cycleLen + 1;
+
+  const ovStart = Math.max(menLen + 1, Math.round(cycleLen/2) - 1);
+  const ovEnd = Math.round(cycleLen/2) + 1;
+
+  let phase;
+  if(dayInCycle <= menLen) phase = 'menstrual';
+  else if(dayInCycle < ovStart) phase = 'follicular';
+  else if(dayInCycle <= ovEnd) phase = 'ovulacao';
+  else phase = 'luteal';
+
+  return { dayInCycle, cycleLen, phase };
+}
+
+function ringSVG(cycleLen, menLen, ovStart, ovEnd, dayInCycle){
+  const size = 104, r = 42, cx = size/2, cy = size/2, stroke = 10;
+  const circumference = 2 * Math.PI * r;
+
+  function arc(startDay, endDay, color){
+    const startFrac = (startDay-1)/cycleLen;
+    const endFrac = endDay/cycleLen;
+    const len = (endFrac - startFrac) * circumference;
+    const offset = circumference - startFrac * circumference;
+    return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${color}" stroke-width="${stroke}"
+      stroke-dasharray="${len} ${circumference}" stroke-dashoffset="${offset}" transform="rotate(-90 ${cx} ${cy})" stroke-linecap="butt"/>`;
+  }
+
+  let segs = '';
+  segs += arc(1, menLen, 'var(--menstrual)');
+  segs += arc(menLen+1, ovStart-1, 'var(--follicular)');
+  segs += arc(ovStart, ovEnd, 'var(--ovulacao)');
+  segs += arc(ovEnd+1, cycleLen, 'var(--luteal)');
+
+  const markerFrac = (dayInCycle-0.5)/cycleLen;
+  const angle = markerFrac * 2 * Math.PI - Math.PI/2;
+  const mx = cx + r * Math.cos(angle);
+  const my = cy + r * Math.sin(angle);
+
+  return `<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}">
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#232a34" stroke-width="${stroke}"/>
+    ${segs}
+    <circle cx="${mx}" cy="${my}" r="4.5" fill="#edf0f4" stroke="#12161d" stroke-width="2"/>
+  </svg>`;
+}
+
+function sparklineSVG(entries){
+  const w = 7, gap = 3, maxH = 26, maxCount = 7;
+  const bars = entries.map((e, i) => {
+    const h = e.count === 0 ? 3 : Math.max(4, Math.round((e.count / maxCount) * maxH));
+    const x = i * (w + gap);
+    const y = maxH - h;
+    const cls = e.count === 0 ? 'spark-bar zero' : 'spark-bar';
+    return `<rect class="${cls}" x="${x}" y="${y}" width="${w}" height="${h}" rx="2"></rect>`;
+  }).join('');
+  const totalW = entries.length * (w + gap);
+  return `<svg viewBox="0 0 ${totalW} ${maxH}" width="${totalW}" height="${maxH}" style="overflow:visible;">${bars}</svg>`;
+}
+
+function render(){
+  const content = document.getElementById('content');
+  if(athletes.length === 0){
+    content.innerHTML = `<div class="empty">
+      <p>Ainda não tens nenhuma atleta registada.</p>
+      <button class="btn-primary" onclick="openModal()">+ Adicionar a primeira atleta</button>
+    </div>`;
+    return;
+  }
+
+  let html = '<div class="grid">';
+  athletes.forEach(a => {
+    const st = computeStatus(a);
+    const p = PHASES[st.phase];
+    const ovStart = Math.max(a.periodLength + 1, Math.round(a.cycleLength/2) - 1);
+    const ovEnd = Math.round(a.cycleLength/2) + 1;
+    const ring = ringSVG(a.cycleLength, a.periodLength, ovStart, ovEnd, st.dayInCycle);
+    const hArr = history[a.name.trim().toLowerCase()];
+    const hLast = hArr && hArr.length ? hArr[hArr.length - 1] : null;
+    const lastDate = hLast ? parseTimestamp(hLast.timestamp) : null;
+    const sinceDays = daysSince(lastDate);
+    const isStale = sinceDays === null ? !hLast : sinceDays > STALE_DAYS;
+
+    html += `<div class="card">
+      <div class="card-top">
+        <div>
+          <p class="name">${escapeHtml(a.name)}<span class="source-tag">${hLast ? 'FORMS' : ''}</span></p>
+          <p class="meta">Ciclo de ${a.cycleLength} dias</p>
+        </div>
+        <button class="icon-btn" onclick="openModal('${a.id}')" aria-label="Editar">✎</button>
+      </div>
+      <div class="ring-row">
+        <div class="ring-wrap">
+          ${ring}
+          <div class="ring-day">
+            <span class="n">${st.dayInCycle}</span>
+            <span class="lbl">dia / ${a.cycleLength}</span>
+          </div>
+        </div>
+        <div class="phase-col">
+          <span class="phase-badge" style="color:${p.color}; background:${p.bg};">${p.label}</span>
+          <p class="rec">${p.rec}</p>
+        </div>
+      </div>
+      ${isStale ? `<div class="warn-badge">⚠ ${hLast ? `sem resposta há ${sinceDays} dia(s)` : 'nunca respondeu ao formulário'}</div>` : ''}
+      ${hLast ? `<div class="history">
+        <div><b>Últimos sintomas reportados</b>${hLast.timestamp ? ' · ' + escapeHtml(hLast.timestamp) : ''}</div>
+        <div>${hLast.symptoms ? escapeHtml(hLast.symptoms) : 'Sem sintomas reportados'}</div>
+        ${hLast.notes ? `<div style="margin-top:4px;">"${escapeHtml(hLast.notes)}"</div>` : ''}
+        ${hArr.length > 1 ? `<div class="spark-row">${sparklineSVG(hArr)}</div>
+        <div style="margin-top:2px; color:var(--ink-faint); font-size:10px;">Intensidade de sintomas nas últimas ${hArr.length} respostas</div>` : ''}
+      </div>` : ''}
+    </div>`;
+  });
+  html += '</div>';
+
+  html += `<div class="legend">
+    <span><span class="dot" style="background:var(--menstrual)"></span>Menstrual</span>
+    <span><span class="dot" style="background:var(--follicular)"></span>Folicular</span>
+    <span><span class="dot" style="background:var(--ovulacao)"></span>Ovulação</span>
+    <span><span class="dot" style="background:var(--luteal)"></span>Lútea</span>
+  </div>`;
+
+  content.innerHTML = html;
+}
+
+function escapeHtml(s){
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function openModal(id){
+  editingId = id || null;
+  const a = id ? athletes.find(x => x.id === id) : null;
+  const root = document.getElementById('modal-root');
+  root.innerHTML = `
+  <div class="overlay" onclick="if(event.target===this) closeModal()">
+    <div class="modal">
+      <h2>${a ? 'Editar atleta' : 'Nova atleta'}</h2>
+      <p class="msub">Preenche os dados de base do ciclo. Podes atualizar sempre que houver um novo período.</p>
+      <div class="field">
+        <label for="f-name">Nome</label>
+        <input id="f-name" type="text" placeholder="Nome da atleta" value="${a ? escapeHtml(a.name) : ''}">
+      </div>
+      <div class="field">
+        <label for="f-start">Data de início do último período</label>
+        <input id="f-start" type="date" value="${a ? a.lastStart : ''}">
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label for="f-cycle">Duração do ciclo (dias)</label>
+          <input id="f-cycle" type="number" min="18" max="45" value="${a ? a.cycleLength : 28}">
+        </div>
+        <div class="field">
+          <label for="f-period">Duração do período (dias)</label>
+          <input id="f-period" type="number" min="1" max="10" value="${a ? a.periodLength : 5}">
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-ghost" onclick="closeModal()">Cancelar</button>
+        <button class="btn-primary" onclick="saveAthlete()">${a ? 'Guardar alterações' : 'Adicionar atleta'}</button>
+      </div>
+      ${a ? '<button class="danger-link" onclick="deleteAthlete()">Remover atleta</button>' : ''}
+    </div>
+  </div>`;
+}
+
+function closeModal(){
+  document.getElementById('modal-root').innerHTML = '';
+  editingId = null;
+}
+
+function saveAthlete(){
+  const name = document.getElementById('f-name').value.trim();
+  const start = document.getElementById('f-start').value;
+  const cycleLength = parseInt(document.getElementById('f-cycle').value, 10) || 28;
+  const periodLength = parseInt(document.getElementById('f-period').value, 10) || 5;
+
+  if(!name || !start){
+    showToast('Preenche o nome e a data de início.');
+    return;
+  }
+
+  if(editingId){
+    const a = athletes.find(x => x.id === editingId);
+    a.name = name; a.lastStart = start; a.cycleLength = cycleLength; a.periodLength = periodLength;
+  }else{
+    athletes.push({ id: 'a' + Date.now(), name, lastStart: start, cycleLength, periodLength });
+  }
+  saveData();
+  closeModal();
+  render();
+  showToast('Guardado.');
+}
+
+function deleteAthlete(){
+  athletes = athletes.filter(x => x.id !== editingId);
+  saveData();
+  closeModal();
+  render();
+  showToast('Atleta removida.');
+}
+
+loadData().then(() => {
+  // Tenta sincronizar automaticamente ao abrir, sem bloquear a primeira renderização
+  setTimeout(() => { syncFromForm().catch(()=>{}); }, 400);
+});
+</script>
+</body>
+</html>
