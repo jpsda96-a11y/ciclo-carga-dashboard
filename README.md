@@ -41,3 +41,4 @@ continuam disponíveis como alternativa.
   guardados no `localStorage` do browser — ou seja, por dispositivo/browser, não partilhado
   automaticamente entre pessoas diferentes. Os dados sincronizados a partir do Google Forms
   continuam a ser a fonte principal e essa, sim, é igual para todos que acedam ao link.
+
