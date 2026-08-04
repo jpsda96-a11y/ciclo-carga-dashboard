@@ -395,13 +395,20 @@ function processCycleRows(rows){
 function processSymptomsRows(rows){
   let updated = 0;
   if(rows.length >= 2){
-    const header = rows[0].map(h => h.trim().toLowerCase());
+    const rawHeader = rows[0];
+    const header = rawHeader.map(h => h.trim().toLowerCase());
     const idx = {
       timestamp: header.findIndex(h => h.includes('carimbo')),
       name: header.findIndex(h => h.includes('nome')),
-      symptoms: header.findIndex(h => h.includes('sintomas')),
       notes: header.findIndex(h => h.includes('notas'))
     };
+    // Colunas da grelha vêm como "Sintomas hoje [Nome do sintoma]" com o valor 1-10 (ou vazio)
+    const symptomCols = [];
+    rawHeader.forEach((raw, i) => {
+      const m = (raw || '').trim().match(/sintomas.*\[(.+)\]/i);
+      if(m) symptomCols.push({ name: m[1].trim(), idx: i });
+    });
+
     history = {}; // rebuild fully from this CSV each time
     for(let i = 1; i < rows.length; i++){
       const r = rows[i];
@@ -409,16 +416,22 @@ function processSymptomsRows(rows){
       const name = (r[idx.name] || '').trim();
       if(!name) continue;
       const key = name.toLowerCase();
-      const symptoms = idx.symptoms >= 0 ? (r[idx.symptoms] || '').trim() : '';
       const notes = idx.notes >= 0 ? (r[idx.notes] || '').trim() : '';
       const timestamp = idx.timestamp >= 0 ? r[idx.timestamp] : '';
-      if(symptoms || notes){
-        const count = (!symptoms || /sem sintomas/i.test(symptoms)) ? 0 : symptoms.split(',').length;
-        if(!history[key]) history[key] = [];
-        history[key].push({ symptoms, notes, timestamp, count });
-        if(history[key].length > 8) history[key] = history[key].slice(-8);
-        updated++;
-      }
+
+      const selected = symptomCols
+        .map(sc => ({ name: sc.name, value: parseInt(r[sc.idx], 10) }))
+        .filter(s => !isNaN(s.value) && s.value > 0);
+
+      const symptoms = selected.length
+        ? selected.map(s => `${s.name} (${s.value})`).join(', ')
+        : 'Sem sintomas';
+      const maxIntensity = selected.length ? Math.max(...selected.map(s => s.value)) : 0;
+
+      if(!history[key]) history[key] = [];
+      history[key].push({ symptoms, notes, timestamp, count: maxIntensity });
+      if(history[key].length > 8) history[key] = history[key].slice(-8);
+      updated++;
     }
   }
   return updated;
@@ -528,7 +541,7 @@ function ringSVG(cycleLen, menLen, ovStart, ovEnd, dayInCycle){
 }
 
 function sparklineSVG(entries){
-  const w = 7, gap = 3, maxH = 26, maxCount = 7;
+  const w = 7, gap = 3, maxH = 26, maxCount = 10;
   const bars = entries.map((e, i) => {
     const h = e.count === 0 ? 3 : Math.max(4, Math.round((e.count / maxCount) * maxH));
     const x = i * (w + gap);
@@ -590,7 +603,7 @@ function render(){
         <div>${hLast.symptoms ? escapeHtml(hLast.symptoms) : 'Sem sintomas reportados'}</div>
         ${hLast.notes ? `<div style="margin-top:4px;">"${escapeHtml(hLast.notes)}"</div>` : ''}
         ${hArr.length > 1 ? `<div class="spark-row">${sparklineSVG(hArr)}</div>
-        <div style="margin-top:2px; color:var(--ink-faint); font-size:10px;">Intensidade de sintomas nas últimas ${hArr.length} respostas</div>` : ''}
+        <div style="margin-top:2px; color:var(--ink-faint); font-size:10px;">Intensidade máxima reportada nas últimas ${hArr.length} respostas</div>` : ''}
       </div>` : ''}
     </div>`;
   });
