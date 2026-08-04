@@ -152,6 +152,14 @@
     font-size:12px; color:var(--ink-muted); line-height:1.5;
   }
   .history b{ color:var(--ink); font-weight:600; }
+  .symptom-table{ width:100%; margin-top:8px; border-spacing:0; }
+  .symptom-table td{ padding:3px 0; font-size:12px; vertical-align:middle; }
+  .symptom-table td.sname{ color:var(--ink-muted); width:46%; padding-right:8px; }
+  .symptom-bar-wrap{ display:flex; align-items:center; gap:7px; }
+  .symptom-bar-bg{ flex:1; height:6px; background:#1c2431; border-radius:3px; overflow:hidden; }
+  .symptom-bar-fill{ height:100%; border-radius:3px; }
+  .symptom-value{ min-width:16px; text-align:right; color:var(--ink); font-weight:700; font-size:11px; }
+  .no-symptoms{ font-size:12px; color:var(--ink-faint); margin-top:8px; }
   .source-tag{
     font-size:10px; color:var(--accent); font-weight:700; letter-spacing:.04em;
     text-transform:uppercase; margin-left:8px;
@@ -427,9 +435,11 @@ function processSymptomsRows(rows){
         ? selected.map(s => `${s.name} (${s.value})`).join(', ')
         : 'Sem sintomas';
       const maxIntensity = selected.length ? Math.max(...selected.map(s => s.value)) : 0;
+      // ordenar por intensidade decrescente para a tabela (pior sintoma primeiro)
+      const selectedSorted = selected.slice().sort((a, b) => b.value - a.value);
 
       if(!history[key]) history[key] = [];
-      history[key].push({ symptoms, notes, timestamp, count: maxIntensity });
+      history[key].push({ symptoms, notes, timestamp, count: maxIntensity, selected: selectedSorted });
       if(history[key].length > 8) history[key] = history[key].slice(-8);
       updated++;
     }
@@ -540,6 +550,29 @@ function ringSVG(cycleLen, menLen, ovStart, ovEnd, dayInCycle){
   </svg>`;
 }
 
+function intensityColor(v){
+  if(v >= 7) return 'var(--menstrual)';
+  if(v >= 4) return 'var(--ovulacao)';
+  return 'var(--follicular)';
+}
+
+function symptomTableHTML(selected){
+  if(!selected || !selected.length){
+    return `<p class="no-symptoms">Sem sintomas reportados</p>`;
+  }
+  const rows = selected.map(s => `
+    <tr>
+      <td class="sname">${escapeHtml(s.name)}</td>
+      <td>
+        <div class="symptom-bar-wrap">
+          <div class="symptom-bar-bg"><div class="symptom-bar-fill" style="width:${s.value * 10}%; background:${intensityColor(s.value)};"></div></div>
+          <span class="symptom-value">${s.value}</span>
+        </div>
+      </td>
+    </tr>`).join('');
+  return `<table class="symptom-table">${rows}</table>`;
+}
+
 function sparklineSVG(entries){
   const w = 7, gap = 3, maxH = 26, maxCount = 10;
   const bars = entries.map((e, i) => {
@@ -600,8 +633,8 @@ function render(){
       ${isStale ? `<div class="warn-badge">⚠ ${hLast ? `sem resposta há ${sinceDays} dia(s)` : 'nunca respondeu ao formulário'}</div>` : ''}
       ${hLast ? `<div class="history">
         <div><b>Últimos sintomas reportados</b>${hLast.timestamp ? ' · ' + escapeHtml(hLast.timestamp) : ''}</div>
-        <div>${hLast.symptoms ? escapeHtml(hLast.symptoms) : 'Sem sintomas reportados'}</div>
-        ${hLast.notes ? `<div style="margin-top:4px;">"${escapeHtml(hLast.notes)}"</div>` : ''}
+        ${symptomTableHTML(hLast.selected)}
+        ${hLast.notes ? `<div style="margin-top:6px; font-size:12px; color:var(--ink-muted);">"${escapeHtml(hLast.notes)}"</div>` : ''}
         ${hArr.length > 1 ? `<div class="spark-row">${sparklineSVG(hArr)}</div>
         <div style="margin-top:2px; color:var(--ink-faint); font-size:10px;">Intensidade máxima reportada nas últimas ${hArr.length} respostas</div>` : ''}
       </div>` : ''}
