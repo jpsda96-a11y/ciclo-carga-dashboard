@@ -319,6 +319,7 @@ async function loadData(){
     // até haver respostas suficientes (ver render()).
     athletes = Array.isArray(raw) ? raw.filter(a => {
       if(!a || typeof a.name !== 'string' || !a.name.trim()) return false;
+      if(isRemovedName(a.name)) return false;
       if(a.fromRoster && (a.lastStart == null || a.lastStart === '')) return true;
       return typeof a.lastStart === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(a.lastStart) &&
         Number.isFinite(a.cycleLength) && a.cycleLength > 0 &&
@@ -629,6 +630,10 @@ async function syncFromForm(){
       symptomsUpdated = processSymptomsRows(rows);
     }catch(e){ /* falha nesta fonte não bloqueia a outra */ }
 
+    // Remove sempre quem já não deve ser acompanhada (ver REMOVED_NAMES), mesmo que tenha
+    // voltado a aparecer numa das sheets.
+    athletes = athletes.filter(a => !isRemovedName(a.name));
+
     // Garante que todas as atletas da lista do formulário diário têm um cartão (mesmo que
     // nunca tenham preenchido o Formulário 1), antes de combinar as fontes de dados.
     ensureRosterAthletes();
@@ -772,13 +777,23 @@ function sparklineSVG(entries){
 // Nomes exatamente como aparecem na lista do formulário diário (pergunta "Nome").
 // Mantém-se manualmente em sincronia com esse formulário — ver README.
 const ROSTER_NAMES = [
-  'Rita Durães', 'Madalena Ferreira', 'Margarida Teles', 'Lara Dias', 'Inês Paiva',
-  'Inês Gonçalves', 'Nádia', 'Íris martins', 'Mariana Mousaco', 'Ana Martins',
-  'Daniela Correia', 'Djamila Gomes', 'Kata Semedo', 'Luisa Fernandes', 'Matilde Teixeira',
-  'Cris Lopes', 'Beatriz faustino', 'Luana Lopes', 'Raquel Santos', 'Rita Teles',
-  'Sofia Abreu', 'Ana Rita', 'Eduarda Szatkowski', 'Lara Perpétua', 'Marta Oliveira',
-  'Virginia Amontao', 'Bruna Silva', 'Eduarda Fernandes'
+  'Ana Martins', 'Beatriz faustino', 'Bruna Silva', 'Cris Lopes', 'Daniela Correia',
+  'Djamila Gomes', 'Eduarda Fernandes', 'Eduarda Szatkowski', 'Inês Gonçalves', 'Inês Paiva',
+  'Íris martins', 'Kata Semedo', 'Lara Dias', 'Lara Perpétua', 'Luana Lopes',
+  'Luisa Fernandes', 'Madalena Ferreira', 'Margarida Teles', 'Mariana Mousaco', 'Marta Oliveira',
+  'Matilde Teixeira', 'Nádia', 'Raquel Santos', 'Rita Durães', 'Rita Teles',
+  'Sofia Abreu', 'Virginia Amontao'
 ];
+
+// Atletas que já não devem ser acompanhadas (ex.: saíram do plantel) mas que, por preencherem
+// ou terem preenchido algum dos formulários, poderiam voltar a aparecer sozinhas. Qualquer
+// nome aqui é sempre removido ao carregar/sincronizar, independentemente da fonte dos dados.
+const REMOVED_NAMES = ['Ana Rita'];
+
+function isRemovedName(name){
+  const key = name.trim().toLowerCase();
+  return REMOVED_NAMES.some(n => n.trim().toLowerCase() === key);
+}
 
 // Garante que toda a gente que consta na lista do formulário diário (ROSTER_NAMES) tem um
 // cartão próprio, mesmo que nunca tenha preenchido o Formulário 1 — caso contrário essas
@@ -857,7 +872,8 @@ function render(){
   }
 
   let html = '<div class="grid">';
-  athletes.forEach(a => {
+  const sortedAthletes = athletes.slice().sort((a, b) => a.name.trim().localeCompare(b.name.trim(), 'pt', { sensitivity: 'base' }));
+  sortedAthletes.forEach(a => {
     const hArr = history[a.name.trim().toLowerCase()];
     const hLast = hArr && hArr.length ? hArr[hArr.length - 1] : null;
     const lastDate = hLast ? parseTimestamp(hLast.timestamp) : null;
