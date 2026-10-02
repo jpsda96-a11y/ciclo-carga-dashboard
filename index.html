@@ -75,6 +75,7 @@
     border-radius:16px; padding:20px; position:relative;
   }
   .card-top{ display:flex; justify-content:space-between; align-items:flex-start; }
+  .card-top-left{ display:flex; align-items:center; gap:10px; min-width:0; }
   .name{ font-size:17px; font-weight:700; margin:0; }
   .meta{ color:var(--ink-faint); font-size:12px; margin:3px 0 0; }
   .icon-btn{
@@ -82,6 +83,21 @@
     padding:4px 6px; border-radius:6px;
   }
   .icon-btn:hover{ color:var(--ink); background:rgba(0,0,0,.05); }
+
+  .avatar{
+    width:44px; height:44px; border-radius:50%; flex-shrink:0; cursor:pointer;
+    background:var(--bg); border:1px solid var(--card-border);
+    display:flex; align-items:center; justify-content:center;
+    overflow:hidden; position:relative;
+  }
+  .avatar img{ width:100%; height:100%; object-fit:cover; display:block; }
+  .avatar-initials{ font-size:14px; font-weight:700; color:var(--ink-muted); }
+  .avatar::after{
+    content:'📷'; position:absolute; bottom:-3px; right:-3px; font-size:9px; line-height:16px;
+    width:16px; height:16px; text-align:center; border-radius:50%;
+    background:var(--card); box-shadow:0 0 0 1px var(--card-border);
+  }
+  .avatar:hover::after{ background:var(--bg); }
 
   .ring-row{ display:flex; align-items:center; gap:18px; margin-top:14px; }
   .ring-wrap{ position:relative; width:104px; height:104px; flex-shrink:0; }
@@ -218,6 +234,7 @@
 
 <div id="modal-root"></div>
 <div class="toast" id="toast"></div>
+<input type="file" id="photo-input" accept="image/*" style="display:none" onchange="handlePhotoFile(event)">
 
 <script>
 const PHASES = {
@@ -296,13 +313,17 @@ async function loadData(){
   try{
     const res = await storageGet('ciclo-atletas');
     const raw = res && res.value ? JSON.parse(res.value) : [];
-    // Defende contra registos corrompidos/incompletos que possam ter ficado de testes anteriores
-    athletes = Array.isArray(raw) ? raw.filter(a =>
-      a && typeof a.name === 'string' && a.name.trim() &&
-      typeof a.lastStart === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(a.lastStart) &&
-      Number.isFinite(a.cycleLength) && a.cycleLength > 0 &&
-      Number.isFinite(a.periodLength) && a.periodLength > 0
-    ) : [];
+    // Defende contra registos corrompidos/incompletos que possam ter ficado de testes anteriores.
+    // Uma atleta "placeholder" vinda só da lista do formulário diário (fromRoster), que ainda não
+    // tem nenhuma data de início detetada, é válida mesmo sem dados de ciclo — fica sem anel/fase
+    // até haver respostas suficientes (ver render()).
+    athletes = Array.isArray(raw) ? raw.filter(a => {
+      if(!a || typeof a.name !== 'string' || !a.name.trim()) return false;
+      if(a.fromRoster && (a.lastStart == null || a.lastStart === '')) return true;
+      return typeof a.lastStart === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(a.lastStart) &&
+        Number.isFinite(a.cycleLength) && a.cycleLength > 0 &&
+        Number.isFinite(a.periodLength) && a.periodLength > 0;
+    }) : [];
   }catch(e){
     athletes = [];
   }
@@ -317,6 +338,7 @@ async function loadData(){
     history = {};
     lastSync = null;
   }
+  ensureRosterAthletes();
   try{
     render();
   }catch(e){
@@ -607,6 +629,10 @@ async function syncFromForm(){
       symptomsUpdated = processSymptomsRows(rows);
     }catch(e){ /* falha nesta fonte não bloqueia a outra */ }
 
+    // Garante que todas as atletas da lista do formulário diário têm um cartão (mesmo que
+    // nunca tenham preenchido o Formulário 1), antes de combinar as fontes de dados.
+    ensureRosterAthletes();
+
     // 3) Combina as duas fontes para calcular a duração real do ciclo e detetar irregularidade
     finalizeCycleStats();
 
@@ -754,6 +780,31 @@ const ROSTER_NAMES = [
   'Virginia Amontao', 'Bruna Silva', 'Eduarda Fernandes'
 ];
 
+// Garante que toda a gente que consta na lista do formulário diário (ROSTER_NAMES) tem um
+// cartão próprio, mesmo que nunca tenha preenchido o Formulário 1 — caso contrário essas
+// respostas ficavam guardadas em "history" mas invisíveis, porque "athletes" só era populado
+// a partir do Formulário 1. Cria registos "placeholder" (fromRoster: true, sem dados de ciclo
+// ainda) que o finalizeCycleStats() preenche automaticamente assim que houver respostas diárias.
+function ensureRosterAthletes(){
+  const existingKeys = new Set(athletes.map(a => a.name.trim().toLowerCase()));
+  ROSTER_NAMES.forEach(name => {
+    const key = name.trim().toLowerCase();
+    if(existingKeys.has(key)) return;
+    athletes.push({
+      id: 'a' + Date.now() + Math.random().toString(36).slice(2, 8),
+      name,
+      lastStart: null,
+      cycleLength: null,
+      periodLength: null,
+      fromRoster: true,
+      // Sem Formulário 1 nem histórico ainda: predefine como "ciclo irregular" até haver
+      // respostas diárias suficientes para calcular a duração real (ver finalizeCycleStats()).
+      isIrregular: true
+    });
+    existingKeys.add(key);
+  });
+}
+
 // Combina as atletas já acompanhadas (vindas do Formulário 1) com a lista completa do
 // formulário diário, para que uma atleta que nunca preencheu o Formulário 1 também apareça
 // no resumo de "sem resposta", em vez de ficar invisível.
@@ -814,13 +865,20 @@ function render(){
     const isStale = sinceDays === null ? !hLast : sinceDays > STALE_DAYS;
 
     let metaLine, ringInner, phaseColHTML;
+    const hasCycleData = Number.isFinite(a.cycleLength) && a.cycleLength > 0 &&
+      Number.isFinite(a.periodLength) && a.periodLength > 0 &&
+      typeof a.lastStart === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(a.lastStart);
 
-    if(a.isIrregular){
+    if(!hasCycleData || a.isIrregular){
+      // Sem dados suficientes ainda (ex.: nunca preencheu o Formulário 1, só aparece no
+      // formulário diário) é tratado, por definição, como "ciclo irregular" — assim que houver
+      // respostas diárias suficientes, finalizeCycleStats() calcula a duração real e, se afinal
+      // for regular, o cartão passa automaticamente para o anel/fase normal.
       const variation = a.cycleStats ? a.cycleStats.variation : null;
       const periodToday = hLast ? hLast.periodToday : null;
       const periodTodayLabel = periodToday === 'sim' ? 'Sim' : (periodToday === 'nao' ? 'Não' : 'Sem resposta');
       const maxIntensity = hLast && hLast.selected && hLast.selected.length ? hLast.selected[0].value : 0;
-      metaLine = a.cycleStats ? `Ciclo irregular (méd. ~${Math.round(a.cycleStats.avg)} dias, ${a.cycleStats.min}–${a.cycleStats.max})` : 'Ciclo irregular';
+      metaLine = a.cycleStats ? `Ciclo irregular (méd. ~${Math.round(a.cycleStats.avg)} dias, ${a.cycleStats.min}–${a.cycleStats.max})` : 'Ciclo irregular (por calcular)';
       ringInner = `<div class="ring-wrap irregular-mark">
           <div class="ring-day">
             <span class="n">?</span>
@@ -853,9 +911,14 @@ function render(){
 
     html += `<div class="card">
       <div class="card-top">
-        <div>
-          <p class="name">${escapeHtml(a.name)}<span class="source-tag">${hLast ? 'FORMS' : ''}</span></p>
-          <p class="meta">${metaLine}</p>
+        <div class="card-top-left">
+          <div class="avatar" onclick="triggerPhotoUpload('${a.id}')" title="Alterar foto">
+            ${a.photo ? `<img src="${a.photo}" alt="">` : `<span class="avatar-initials">${escapeHtml(initials(a.name))}</span>`}
+          </div>
+          <div>
+            <p class="name">${escapeHtml(a.name)}<span class="source-tag">${hLast ? 'FORMS' : ''}</span></p>
+            <p class="meta">${metaLine}</p>
+          </div>
         </div>
         <button class="icon-btn" onclick="openModal('${a.id}')" aria-label="Editar">✎</button>
       </div>
@@ -890,6 +953,66 @@ function escapeHtml(s){
   const d = document.createElement('div');
   d.textContent = s;
   return d.innerHTML;
+}
+
+function initials(name){
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  const chars = parts.length > 1 ? [parts[0][0], parts[parts.length - 1][0]] : [parts[0] ? parts[0][0] : '?'];
+  return chars.join('').toUpperCase();
+}
+
+let pendingPhotoAthleteId = null;
+
+function triggerPhotoUpload(id){
+  pendingPhotoAthleteId = id;
+  const input = document.getElementById('photo-input');
+  if(input) input.click();
+}
+
+// Lê a foto escolhida, recorta-a em quadrado e reduz o tamanho antes de guardar (como texto
+// base64 junto com os restantes dados da atleta), para não sobrecarregar o armazenamento.
+function handlePhotoFile(event){
+  const input = event.target;
+  const file = input.files && input.files[0];
+  const id = pendingPhotoAthleteId;
+  input.value = '';
+  pendingPhotoAthleteId = null;
+  if(!file || !id) return;
+  if(!file.type || !file.type.startsWith('image/')){
+    showToast('Escolhe um ficheiro de imagem.');
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      const size = 160;
+      const canvas = document.createElement('canvas');
+      canvas.width = size; canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      const side = Math.min(img.width, img.height);
+      const sx = (img.width - side) / 2, sy = (img.height - side) / 2;
+      ctx.drawImage(img, sx, sy, side, side, 0, 0, size, size);
+      let dataUrl;
+      try{
+        dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+      }catch(e){
+        showToast('Não foi possível processar a imagem.');
+        return;
+      }
+      const a = athletes.find(x => x.id === id);
+      if(a){
+        a.photo = dataUrl;
+        saveData();
+        render();
+        showToast('Foto atualizada.');
+      }
+    };
+    img.onerror = () => showToast('Não foi possível ler a imagem.');
+    img.src = reader.result;
+  };
+  reader.onerror = () => showToast('Não foi possível ler o ficheiro.');
+  reader.readAsDataURL(file);
 }
 
 function openModal(id){

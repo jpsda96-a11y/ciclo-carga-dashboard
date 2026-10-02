@@ -34,6 +34,17 @@ Para publicar atualizações futuras, corre `npx vercel --prod` na mesma pasta.
   período começou e ajusta a duração média, a duração do período e um aviso de "ciclo
   irregular" quando a variação entre ciclos é grande. Não é preciso voltar a preencher o
   primeiro formulário depois disso.
+- Todas as atletas que constam na lista do formulário diário têm sempre um cartão próprio,
+  mesmo que nunca tenham preenchido o primeiro formulário — essas atletas aparecem
+  predefinidas como "ciclo irregular" (sem dados suficientes ainda) e o dashboard passa
+  automaticamente para o anel/fase normal assim que acumular respostas diárias suficientes
+  para calcular uma duração de ciclo fiável.
+
+## Foto da atleta
+
+- Em cada cartão, clica no círculo com as iniciais da atleta para carregar uma foto do
+  telemóvel/computador. A imagem é recortada em quadrado e reduzida antes de ser guardada,
+  para não ocupar muito espaço.
 
 ## Nota importante sobre sincronização
 
