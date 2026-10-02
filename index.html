@@ -250,6 +250,7 @@ const PHASES = {
 
 const CYCLE_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRxOL9gP9q2i3x8QO-_7TzMZTWxTBf3g-nsnPmcXOAdgu0N8nd0J6vqDb8pODiAVdSvfMPTTg43nnLN/pub?output=csv';
 const SYMPTOMS_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQ4IFQLQbvE8LjNU8QMDBOseYUgMzPiQBUJw0M9PSbpNz5n3Xvxb6xwy6zuUz-yFPjMPDv2jjZzURu6/pub?output=csv';
+const PHOTO_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRrJ4IgG7ml5XJJiekZaW9EPTuIzNDLqVUIV1mw7eRJAPBO5Mu7gL1adwzWSuqm3YF8QBvz4SpZczRK/pub?output=csv';
 const STALE_DAYS = 3;
 // Se a diferença entre o ciclo mais curto e mais longo (nas últimas submissões) for >= a isto, tratamos o ciclo como irregular
 const IRREGULAR_THRESHOLD_DAYS = 7;
@@ -567,6 +568,47 @@ function processSymptomsRows(rows){
   return updated;
 }
 
+// Extrai o ID de um ficheiro do Google Drive a partir de um link típico das respostas de
+// um formulário com upload de ficheiro (ex.: "https://drive.google.com/open?id=XXXX" ou
+// ".../file/d/XXXX/view"), e devolve um URL de imagem diretamente utilizável num <img>.
+function driveFileIdToImageUrl(link){
+  if(!link) return null;
+  const m = link.match(/[?&]id=([^&\s]+)/) || link.match(/\/file\/d\/([^/\s]+)/) || link.match(/\/d\/([^/\s]+)/);
+  if(!m) return null;
+  return `https://drive.google.com/thumbnail?id=${m[1]}&sz=w200`;
+}
+
+// Formulário dedicado "Foto da atleta — FC Alverca" (Nome + Foto), preenchido uma vez por
+// atleta, para que a foto fique disponível em qualquer dispositivo (ao contrário do upload
+// manual local, que só fica guardado no browser onde foi feito — ver avatar/handlePhotoFile).
+function processPhotoRows(rows){
+  let updated = 0;
+  if(rows.length >= 2){
+    const header = rows[0].map(h => h.trim().toLowerCase());
+    const idx = {
+      name: header.findIndex(h => h.includes('nome')),
+      photo: header.findIndex(h => h.includes('foto'))
+    };
+    if(idx.name < 0 || idx.photo < 0) return updated;
+    for(let i = 1; i < rows.length; i++){
+      const r = rows[i];
+      if(!r) continue;
+      const name = (r[idx.name] || '').trim();
+      if(!name) continue;
+      const link = (r[idx.photo] || '').trim().split(',')[0].trim(); // só o primeiro ficheiro, se houver mais do que um
+      const imgUrl = driveFileIdToImageUrl(link);
+      if(!imgUrl) continue;
+      const key = name.toLowerCase();
+      const a = athletes.find(x => x.name.trim().toLowerCase() === key);
+      if(a){
+        a.formPhoto = imgUrl;
+        updated++;
+      }
+    }
+  }
+  return updated;
+}
+
 // Combina as datas de início vindas do Formulário 1 (recolha inicial, raramente repetida)
 // com as detetadas automaticamente no formulário diário, para calcular a duração real do
 // ciclo de cada atleta e sinalizar irregularidade — sem depender de a atleta voltar a
@@ -616,7 +658,7 @@ async function syncFromForm(){
   const original = btn.textContent;
   btn.textContent = 'A sincronizar…';
   btn.disabled = true;
-  let cycleUpdated = 0, symptomsUpdated = 0;
+  let cycleUpdated = 0, symptomsUpdated = 0, photosUpdated = 0;
   try{
     // 1) Configuração do ciclo (preenchido quando o período começa)
     try{
@@ -638,7 +680,14 @@ async function syncFromForm(){
     // nunca tenham preenchido o Formulário 1), antes de combinar as fontes de dados.
     ensureRosterAthletes();
 
-    // 3) Combina as duas fontes para calcular a duração real do ciclo e detetar irregularidade
+    // 3) Foto da atleta (formulário dedicado) — precisa de "athletes" já populado para
+    // conseguir associar cada foto ao cartão certo.
+    try{
+      const rows = await fetchCSV(PHOTO_CSV_URL);
+      photosUpdated = processPhotoRows(rows);
+    }catch(e){ /* falha nesta fonte não bloqueia as outras */ }
+
+    // 4) Combina as duas fontes de ciclo para calcular a duração real e detetar irregularidade
     finalizeCycleStats();
 
     await saveData();
@@ -929,7 +978,7 @@ function render(){
       <div class="card-top">
         <div class="card-top-left">
           <div class="avatar" onclick="triggerPhotoUpload('${a.id}')" title="Alterar foto">
-            ${a.photo ? `<img src="${a.photo}" alt="">` : `<span class="avatar-initials">${escapeHtml(initials(a.name))}</span>`}
+            ${(a.photo || a.formPhoto) ? `<img src="${a.photo || a.formPhoto}" alt="">` : `<span class="avatar-initials">${escapeHtml(initials(a.name))}</span>`}
           </div>
           <div>
             <p class="name">${escapeHtml(a.name)}<span class="source-tag">${hLast ? 'FORMS' : ''}</span></p>

@@ -42,14 +42,20 @@ Para publicar atualizações futuras, corre `npx vercel --prod` na mesma pasta.
 
 ## Foto da atleta
 
-- Em cada cartão, clica no círculo com as iniciais da atleta para carregar uma foto do
-  telemóvel/computador. A imagem é recortada em quadrado e reduzida antes de ser guardada,
-  para não ocupar muito espaço.
+- Cada atleta preenche **uma vez** o formulário dedicado "Foto da atleta — FC Alverca"
+  (nome + foto), partilhado em: https://forms.gle/Y5vJccBxAtPaB8nc9
+- Essa foto fica guardada no Google Sheets/Drive e é sincronizada automaticamente para o
+  dashboard em qualquer dispositivo — ao contrário do upload manual (ver abaixo), que só
+  fica guardado no browser onde foi feito.
+- Também continua a ser possível clicar no círculo com as iniciais da atleta para carregar
+  uma foto diretamente do telemóvel/computador (recortada em quadrado antes de guardar).
+  Esse upload manual é só local a esse dispositivo/browser, mas tem sempre prioridade sobre
+  a foto sincronizada do formulário, caso ambas existam.
 
 ## Nota importante sobre sincronização
 
-Este dashboard tenta sincronizar automaticamente com dois Google Sheets publicados como CSV
-(configuração do ciclo e sintomas diários). Dentro do ambiente sandbox do Claude essa
+Este dashboard tenta sincronizar automaticamente com três Google Sheets publicados como CSV
+(configuração do ciclo, sintomas diários e foto da atleta). Dentro do ambiente sandbox do Claude essa
 sincronização automática pode estar bloqueada por restrições de rede — **depois de publicado
 no Vercel, deixa de haver essa restrição**, pelo que a sincronização automática deve passar a
 funcionar sozinha. Se mesmo assim houver problemas, os botões de "Carregar CSV" manual
