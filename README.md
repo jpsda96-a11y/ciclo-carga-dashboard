@@ -1,7 +1,7 @@
 # Ciclo & Carga — Monitorização de treino
 
 Dashboard para acompanhar a fase do ciclo menstrual de cada atleta e ajustar carga de treino,
-sincronizado com dois Google Forms (configuração do ciclo + registo diário de sintomas).
+sincronizado automaticamente a partir dos dados preenchidos pelas atletas.
 
 ## Publicar no Vercel
 
@@ -24,6 +24,16 @@ Para publicar atualizações futuras, corre `npx vercel --prod` na mesma pasta.
 2. Vai a [vercel.com/new](https://vercel.com/new), faz login e escolhe "Import" nesse repositório.
 3. Deixa as definições por defeito (é um site estático, não precisa de build) e clica em "Deploy".
 4. Sempre que atualizares o ficheiro no GitHub, o Vercel republica sozinho.
+
+## Como funciona o cálculo do ciclo
+
+- O primeiro formulário (dados iniciais) só precisa de ser preenchido **uma vez** por atleta,
+  para dar um ponto de partida (nome + estimativa inicial de duração de ciclo/período).
+- A partir daí, a duração real do ciclo é calculada automaticamente a partir das respostas
+  diárias à pergunta "Estás com o período hoje?" — o dashboard deteta sozinho quando cada
+  período começou e ajusta a duração média, a duração do período e um aviso de "ciclo
+  irregular" quando a variação entre ciclos é grande. Não é preciso voltar a preencher o
+  primeiro formulário depois disso.
 
 ## Nota importante sobre sincronização
 

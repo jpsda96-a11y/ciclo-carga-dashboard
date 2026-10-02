@@ -171,6 +171,9 @@
   .spark-row{ display:flex; align-items:flex-end; gap:3px; height:28px; margin-top:6px; }
   .spark-bar{ width:7px; border-radius:2px 2px 0 0; background:var(--accent); opacity:.55; }
   .spark-bar.zero{ background:var(--ink-faint); opacity:.35; }
+  .irregular-badge{ color:#8a5f0a; background:#fdf1d8; }
+  .ring-wrap.irregular-mark{ display:flex; align-items:center; justify-content:center; border:2px dashed var(--ink-faint); border-radius:50%; }
+  .ring-wrap.irregular-mark .n{ color:var(--ink-faint); }
 </style>
 </head>
 <body>
@@ -215,11 +218,17 @@ const PHASES = {
 const CYCLE_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRxOL9gP9q2i3x8QO-_7TzMZTWxTBf3g-nsnPmcXOAdgu0N8nd0J6vqDb8pODiAVdSvfMPTTg43nnLN/pub?output=csv';
 const SYMPTOMS_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQ4IFQLQbvE8LjNU8QMDBOseYUgMzPiQBUJw0M9PSbpNz5n3Xvxb6xwy6zuUz-yFPjMPDv2jjZzURu6/pub?output=csv';
 const STALE_DAYS = 3;
+// Se a diferença entre o ciclo mais curto e mais longo (nas últimas submissões) for >= a isto, tratamos o ciclo como irregular
+const IRREGULAR_THRESHOLD_DAYS = 7;
 
 let athletes = [];
 let editingId = null;
 let history = {}; // name (lowercase) -> array of { symptoms, notes, timestamp, count }
 let lastSync = null;
+// Estados temporários de cada sincronização, usados só para calcular o ciclo a partir
+// do histórico completo (Formulário 1, preenchido uma única vez, + Formulário diário).
+let cycleStartsFromForm1 = new Map(); // key -> string[] (datas ISO)
+let cycleStartsFromForm2 = new Map(); // key -> { starts: string[], streakLengths: number[] }
 
 function parseTimestamp(str){
   if(!str) return null;
@@ -359,6 +368,7 @@ async function fetchCSV(url){
 
 function processCycleRows(rows){
   let updated = 0;
+  cycleStartsFromForm1 = new Map();
   if(rows.length >= 2){
     const header = rows[0].map(h => h.trim().toLowerCase());
     const idx = {
@@ -369,7 +379,11 @@ function processCycleRows(rows){
     };
     if(idx.name < 0) return updated; // não conseguimos identificar a coluna do nome — não mexe na lista atual
 
-    const validNames = new Set();
+    // O Formulário 1 serve só para a recolha inicial de dados (nome + estimativa inicial de
+    // duração de ciclo/período): não é suposto ser preenchido com frequência. Mesmo assim,
+    // se alguma vez voltar a ser preenchido, guardamos todas as datas indicadas — o cálculo
+    // fino do ciclo é feito depois em finalizeCycleStats(), combinando isto com o formulário diário.
+    const byName = new Map(); // key -> { name, starts: Set(iso), cycleLength, periodLength }
     for(let i = 1; i < rows.length; i++){
       const r = rows[i];
       if(!r) continue;
@@ -379,19 +393,35 @@ function processCycleRows(rows){
       const startIso = idx.start >= 0 ? parseFormDate(r[idx.start]) : null;
       const cycleLength = idx.cycle >= 0 ? parseInt(r[idx.cycle], 10) : NaN;
       const periodLength = idx.period >= 0 ? parseInt(r[idx.period], 10) : NaN;
-      if(startIso && !isNaN(cycleLength) && !isNaN(periodLength)){
-        validNames.add(key);
-        let a = athletes.find(x => x.name.trim().toLowerCase() === key);
-        if(!a){
-          a = { id: 'a' + Date.now() + Math.random().toString(36).slice(2,6), name, lastStart: startIso, cycleLength, periodLength, fromSheet: true };
-          athletes.push(a);
-        }else{
-          a.lastStart = startIso; a.cycleLength = cycleLength; a.periodLength = periodLength;
-          a.fromSheet = true; // a Sheet passa a "adotar" este registo (mesmo que tenha sido criado manualmente antes)
-        }
-        updated++;
-      }
+      if(!startIso || isNaN(cycleLength) || isNaN(periodLength)) continue;
+      if(!byName.has(key)) byName.set(key, { name, starts: new Set(), cycleLength, periodLength });
+      const entry = byName.get(key);
+      entry.starts.add(startIso);
+      entry.cycleLength = cycleLength; // fica com o último valor indicado (a linha mais recente encontrada)
+      entry.periodLength = periodLength;
+      entry.name = name;
     }
+
+    const validNames = new Set();
+    byName.forEach((entry, key) => {
+      validNames.add(key);
+      const startsSorted = Array.from(entry.starts).sort(); // strings ISO ordenam corretamente como texto
+      cycleStartsFromForm1.set(key, startsSorted);
+
+      let a = athletes.find(x => x.name.trim().toLowerCase() === key);
+      if(!a){
+        a = { id: 'a' + Date.now() + Math.random().toString(36).slice(2,6), name: entry.name, lastStart: startsSorted[startsSorted.length - 1], cycleLength: entry.cycleLength, periodLength: entry.periodLength, fromSheet: true };
+        athletes.push(a);
+      }else{
+        a.fromSheet = true; // a Sheet passa a "adotar" este registo (mesmo que tenha sido criado manualmente antes)
+        // Não sobrescrevemos lastStart/cycleLength/periodLength diretamente aqui — isso é feito
+        // em finalizeCycleStats(), que combina isto com as datas detetadas no formulário diário.
+        if(!a.cycleLength) a.cycleLength = entry.cycleLength;
+        if(!a.periodLength) a.periodLength = entry.periodLength;
+      }
+      updated++;
+    });
+
     // A Sheet é a fonte de verdade só para quem veio dela: remove atletas com fromSheet=true
     // cuja linha já não existe (foi apagada no Excel/Sheets). Atletas adicionadas manualmente
     // que nunca apareceram na Sheet (fromSheet nunca ficou true) ficam sempre protegidas.
@@ -400,15 +430,42 @@ function processCycleRows(rows){
   return updated;
 }
 
+// A partir das respostas diárias "Estás com o período hoje?" (uma por dia, em ordem
+// cronológica), deteta automaticamente quando cada período começou (transição
+// Não/sem resposta -> Sim) e durante quantos dias seguidos durou.
+function detectPeriodStartsFromDaily(dayEntries){
+  const starts = [];
+  const streakLengths = [];
+  let prevStatus = null;
+  let currentStreakLen = 0;
+  for(const e of dayEntries){
+    if(e.periodToday === 'sim'){
+      if(prevStatus !== 'sim'){
+        starts.push(e.dateISO);
+        currentStreakLen = 1;
+      }else{
+        currentStreakLen++;
+      }
+    }else if(e.periodToday === 'nao'){
+      if(prevStatus === 'sim' && currentStreakLen > 0) streakLengths.push(currentStreakLen);
+      currentStreakLen = 0;
+    }
+    if(e.periodToday) prevStatus = e.periodToday;
+  }
+  return { starts, streakLengths };
+}
+
 function processSymptomsRows(rows){
   let updated = 0;
+  cycleStartsFromForm2 = new Map();
   if(rows.length >= 2){
     const rawHeader = rows[0];
     const header = rawHeader.map(h => h.trim().toLowerCase());
     const idx = {
       timestamp: header.findIndex(h => h.includes('carimbo')),
       name: header.findIndex(h => h.includes('nome')),
-      notes: header.findIndex(h => h.includes('notas'))
+      notes: header.findIndex(h => h.includes('notas')),
+      periodToday: header.findIndex(h => h.includes('período hoje') || h.includes('periodo hoje'))
     };
     // Colunas da grelha vêm como "Sintomas hoje [Nome do sintoma]" com o valor 1-10 (ou vazio)
     const symptomCols = [];
@@ -418,6 +475,7 @@ function processSymptomsRows(rows){
     });
 
     history = {}; // rebuild fully from this CSV each time
+    const dayMapByName = new Map(); // key -> Map(dateISO -> periodToday), para detetar início do ciclo
     for(let i = 1; i < rows.length; i++){
       const r = rows[i];
       if(!r || idx.name < 0) continue;
@@ -426,6 +484,8 @@ function processSymptomsRows(rows){
       const key = name.toLowerCase();
       const notes = idx.notes >= 0 ? (r[idx.notes] || '').trim() : '';
       const timestamp = idx.timestamp >= 0 ? r[idx.timestamp] : '';
+      const periodTodayRaw = idx.periodToday >= 0 ? (r[idx.periodToday] || '').trim().toLowerCase() : '';
+      const periodToday = periodTodayRaw.startsWith('sim') ? 'sim' : (periodTodayRaw.startsWith('n') ? 'nao' : null);
 
       const selected = symptomCols
         .map(sc => ({ name: sc.name, value: parseInt(r[sc.idx], 10) }))
@@ -439,12 +499,72 @@ function processSymptomsRows(rows){
       const selectedSorted = selected.slice().sort((a, b) => b.value - a.value);
 
       if(!history[key]) history[key] = [];
-      history[key].push({ symptoms, notes, timestamp, count: maxIntensity, selected: selectedSorted });
+      history[key].push({ symptoms, notes, timestamp, count: maxIntensity, selected: selectedSorted, periodToday });
       if(history[key].length > 8) history[key] = history[key].slice(-8);
+
+      if(periodToday){
+        const ts = parseTimestamp(timestamp);
+        if(ts){
+          const dateISO = `${ts.getFullYear()}-${String(ts.getMonth()+1).padStart(2,'0')}-${String(ts.getDate()).padStart(2,'0')}`;
+          if(!dayMapByName.has(key)) dayMapByName.set(key, new Map());
+          dayMapByName.get(key).set(dateISO, periodToday); // se houver mais do que uma resposta no mesmo dia, fica a mais recente
+        }
+      }
       updated++;
     }
+
+    dayMapByName.forEach((dayMap, key) => {
+      const dayEntries = Array.from(dayMap.entries())
+        .map(([dateISO, periodToday]) => ({ dateISO, periodToday }))
+        .sort((a, b) => a.dateISO < b.dateISO ? -1 : (a.dateISO > b.dateISO ? 1 : 0));
+      cycleStartsFromForm2.set(key, detectPeriodStartsFromDaily(dayEntries));
+    });
   }
   return updated;
+}
+
+// Combina as datas de início vindas do Formulário 1 (recolha inicial, raramente repetida)
+// com as detetadas automaticamente no formulário diário, para calcular a duração real do
+// ciclo de cada atleta e sinalizar irregularidade — sem depender de a atleta voltar a
+// preencher o Formulário 1.
+function finalizeCycleStats(){
+  const allKeys = new Set([...cycleStartsFromForm1.keys(), ...cycleStartsFromForm2.keys()]);
+  allKeys.forEach(key => {
+    const a = athletes.find(x => x.name.trim().toLowerCase() === key);
+    if(!a) return; // sem atleta correspondente (nunca passou pelo Formulário 1) — ignora
+
+    const form1Starts = cycleStartsFromForm1.get(key) || [];
+    const form2 = cycleStartsFromForm2.get(key) || { starts: [], streakLengths: [] };
+    const allStarts = Array.from(new Set([...form1Starts, ...form2.starts])).sort();
+    if(allStarts.length === 0) return; // nada detetado nesta sincronização — mantém os valores já guardados
+
+    const gaps = [];
+    for(let i = 1; i < allStarts.length; i++){
+      const d1 = new Date(allStarts[i-1] + 'T00:00:00');
+      const d2 = new Date(allStarts[i] + 'T00:00:00');
+      const diffDays = Math.round((d2 - d1) / 86400000);
+      if(diffDays > 0) gaps.push(diffDays);
+    }
+    let cycleStats = null;
+    if(gaps.length >= 2){
+      const avg = gaps.reduce((s,v) => s+v, 0) / gaps.length;
+      const min = Math.min(...gaps);
+      const max = Math.max(...gaps);
+      cycleStats = { avg: Math.round(avg * 10) / 10, min, max, variation: max - min, samples: gaps.length };
+    }
+
+    a.lastStart = allStarts[allStarts.length - 1];
+    a.cycleLength = cycleStats ? Math.round(cycleStats.avg) : a.cycleLength;
+    a.cycleStats = cycleStats; // null enquanto não há pelo menos 3 datas de início conhecidas
+    a.isIrregular = !!(cycleStats && cycleStats.variation >= IRREGULAR_THRESHOLD_DAYS);
+
+    // Duração do período: se já houver "sequências de Sim" completas no diário, usa a média
+    // real reportada; caso contrário mantém o valor inicial indicado no Formulário 1.
+    if(form2.streakLengths.length){
+      const avgPeriod = form2.streakLengths.reduce((s,v) => s+v, 0) / form2.streakLengths.length;
+      a.periodLength = Math.max(1, Math.round(avgPeriod));
+    }
+  });
 }
 
 async function syncFromForm(){
@@ -465,6 +585,9 @@ async function syncFromForm(){
       const rows = await fetchCSV(SYMPTOMS_CSV_URL);
       symptomsUpdated = processSymptomsRows(rows);
     }catch(e){ /* falha nesta fonte não bloqueia a outra */ }
+
+    // 3) Combina as duas fontes para calcular a duração real do ciclo e detetar irregularidade
+    finalizeCycleStats();
 
     await saveData();
     lastSync = Date.now();
@@ -573,6 +696,19 @@ function symptomTableHTML(selected){
   return `<table class="symptom-table">${rows}</table>`;
 }
 
+function fallbackRecommendation(periodToday, maxIntensity){
+  if(periodToday === 'sim'){
+    return 'Confirmou hoje que está com período. Carga baixa a moderada — prioriza técnica, mobilidade e trabalho aeróbio leve.';
+  }
+  if(maxIntensity >= 7){
+    return 'Sintomas de intensidade elevada reportados hoje. Ajusta a carga com base no bem-estar reportado, independentemente da fase estimada.';
+  }
+  if(periodToday === 'nao'){
+    return 'Confirmou hoje que não está com período. Usa o feedback diário de sintomas para calibrar volume e intensidade.';
+  }
+  return 'Sem previsão fiável de fase para um ciclo tão variável. Usa a resposta diária ao formulário e os sintomas reportados para calibrar a carga.';
+}
+
 function sparklineSVG(entries){
   const w = 7, gap = 3, maxH = 26, maxCount = 10;
   const bars = entries.map((e, i) => {
@@ -598,37 +734,61 @@ function render(){
 
   let html = '<div class="grid">';
   athletes.forEach(a => {
-    const st = computeStatus(a);
-    const p = PHASES[st.phase];
-    const ovStart = Math.max(a.periodLength + 1, Math.round(a.cycleLength/2) - 1);
-    const ovEnd = Math.round(a.cycleLength/2) + 1;
-    const ring = ringSVG(a.cycleLength, a.periodLength, ovStart, ovEnd, st.dayInCycle);
     const hArr = history[a.name.trim().toLowerCase()];
     const hLast = hArr && hArr.length ? hArr[hArr.length - 1] : null;
     const lastDate = hLast ? parseTimestamp(hLast.timestamp) : null;
     const sinceDays = daysSince(lastDate);
     const isStale = sinceDays === null ? !hLast : sinceDays > STALE_DAYS;
 
-    html += `<div class="card">
-      <div class="card-top">
-        <div>
-          <p class="name">${escapeHtml(a.name)}<span class="source-tag">${hLast ? 'FORMS' : ''}</span></p>
-          <p class="meta">Ciclo de ${a.cycleLength} dias</p>
-        </div>
-        <button class="icon-btn" onclick="openModal('${a.id}')" aria-label="Editar">✎</button>
-      </div>
-      <div class="ring-row">
-        <div class="ring-wrap">
+    let metaLine, ringInner, phaseColHTML;
+
+    if(a.isIrregular){
+      const variation = a.cycleStats ? a.cycleStats.variation : null;
+      const periodToday = hLast ? hLast.periodToday : null;
+      const periodTodayLabel = periodToday === 'sim' ? 'Sim' : (periodToday === 'nao' ? 'Não' : 'Sem resposta');
+      const maxIntensity = hLast && hLast.selected && hLast.selected.length ? hLast.selected[0].value : 0;
+      metaLine = a.cycleStats ? `Ciclo irregular (méd. ~${Math.round(a.cycleStats.avg)} dias, ${a.cycleStats.min}–${a.cycleStats.max})` : 'Ciclo irregular';
+      ringInner = `<div class="ring-wrap irregular-mark">
+          <div class="ring-day">
+            <span class="n">?</span>
+            <span class="lbl">irregular</span>
+          </div>
+        </div>`;
+      phaseColHTML = `<div class="phase-col">
+          <span class="phase-badge irregular-badge">Ciclo irregular</span>
+          <p class="rec">${variation !== null ? `Variação de ${variation} dia(s) entre os últimos ciclos. ` : ''}Período hoje: <b>${periodTodayLabel}</b>. ${fallbackRecommendation(periodToday, maxIntensity)}</p>
+        </div>`;
+    }else{
+      const st = computeStatus(a);
+      const p = PHASES[st.phase];
+      const ovStart = Math.max(a.periodLength + 1, Math.round(a.cycleLength/2) - 1);
+      const ovEnd = Math.round(a.cycleLength/2) + 1;
+      const ring = ringSVG(a.cycleLength, a.periodLength, ovStart, ovEnd, st.dayInCycle);
+      metaLine = `Ciclo de ${a.cycleLength} dias`;
+      ringInner = `<div class="ring-wrap">
           ${ring}
           <div class="ring-day">
             <span class="n">${st.dayInCycle}</span>
             <span class="lbl">dia / ${a.cycleLength}</span>
           </div>
-        </div>
-        <div class="phase-col">
+        </div>`;
+      phaseColHTML = `<div class="phase-col">
           <span class="phase-badge" style="color:${p.color}; background:${p.bg};">${p.label}</span>
           <p class="rec">${p.rec}</p>
+        </div>`;
+    }
+
+    html += `<div class="card">
+      <div class="card-top">
+        <div>
+          <p class="name">${escapeHtml(a.name)}<span class="source-tag">${hLast ? 'FORMS' : ''}</span></p>
+          <p class="meta">${metaLine}</p>
         </div>
+        <button class="icon-btn" onclick="openModal('${a.id}')" aria-label="Editar">✎</button>
+      </div>
+      <div class="ring-row">
+        ${ringInner}
+        ${phaseColHTML}
       </div>
       ${isStale ? `<div class="warn-badge">⚠ ${hLast ? `sem resposta há ${sinceDays} dia(s)` : 'nunca respondeu ao formulário'}</div>` : ''}
       ${hLast ? `<div class="history">
