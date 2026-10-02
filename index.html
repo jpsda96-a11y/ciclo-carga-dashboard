@@ -171,6 +171,21 @@
   .spark-row{ display:flex; align-items:flex-end; gap:3px; height:28px; margin-top:6px; }
   .spark-bar{ width:7px; border-radius:2px 2px 0 0; background:var(--accent); opacity:.55; }
   .spark-bar.zero{ background:var(--ink-faint); opacity:.35; }
+  .stale-summary{
+    margin-top:14px; padding:14px 16px; border-radius:12px;
+    background:var(--luteal-bg); border:1px solid #f0d9bd;
+  }
+  .stale-summary .title{
+    font-size:12px; font-weight:700; letter-spacing:.03em; text-transform:uppercase;
+    color:var(--luteal); margin:0 0 8px;
+  }
+  .stale-list{ display:flex; flex-wrap:wrap; gap:8px; }
+  .stale-chip{
+    display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:600;
+    color:var(--ink); background:var(--card); border:1px solid var(--card-border);
+    padding:5px 10px; border-radius:999px;
+  }
+  .stale-chip .days{ color:var(--luteal); font-weight:700; }
   .irregular-badge{ color:#8a5f0a; background:#fdf1d8; }
   .ring-wrap.irregular-mark{ display:flex; align-items:center; justify-content:center; border:2px dashed var(--ink-faint); border-radius:50%; }
   .ring-wrap.irregular-mark .n{ color:var(--ink-faint); }
@@ -190,6 +205,7 @@
     </div>
   </header>
   <p class="sync-meta" id="sync-meta"></p>
+  <div id="stale-summary"></div>
 
   <div class="divider"></div>
 
@@ -465,7 +481,8 @@ function processSymptomsRows(rows){
       timestamp: header.findIndex(h => h.includes('carimbo')),
       name: header.findIndex(h => h.includes('nome')),
       notes: header.findIndex(h => h.includes('notas')),
-      periodToday: header.findIndex(h => h.includes('período hoje') || h.includes('periodo hoje'))
+      periodToday: header.findIndex(h => h.includes('período hoje') || h.includes('periodo hoje')),
+      startDate: header.findIndex(h => h.includes('dia começou') || h.includes('dia comecou') || h.includes('quando começou') || h.includes('quando comecou'))
     };
     // Colunas da grelha vêm como "Sintomas hoje [Nome do sintoma]" com o valor 1-10 (ou vazio)
     const symptomCols = [];
@@ -503,9 +520,13 @@ function processSymptomsRows(rows){
       if(history[key].length > 8) history[key] = history[key].slice(-8);
 
       if(periodToday){
-        const ts = parseTimestamp(timestamp);
-        if(ts){
-          const dateISO = `${ts.getFullYear()}-${String(ts.getMonth()+1).padStart(2,'0')}-${String(ts.getDate()).padStart(2,'0')}`;
+        // Se a atleta indicou explicitamente em que dia o período começou, usamos essa data
+        // (mais fiável do que assumir que começou no dia em que ela preencheu o formulário —
+        // pode ter respondido com atraso). Caso contrário, usa a data de submissão.
+        const explicitStart = (periodToday === 'sim' && idx.startDate >= 0) ? parseFormDate(r[idx.startDate]) : null;
+        const ts = explicitStart ? null : parseTimestamp(timestamp);
+        const dateISO = explicitStart || (ts ? `${ts.getFullYear()}-${String(ts.getMonth()+1).padStart(2,'0')}-${String(ts.getDate()).padStart(2,'0')}` : null);
+        if(dateISO){
           if(!dayMapByName.has(key)) dayMapByName.set(key, new Map());
           dayMapByName.get(key).set(dateISO, periodToday); // se houver mais do que uma resposta no mesmo dia, fica a mais recente
         }
@@ -722,6 +743,24 @@ function sparklineSVG(entries){
   return `<svg viewBox="0 0 ${totalW} ${maxH}" width="${totalW}" height="${maxH}" style="overflow:visible;">${bars}</svg>`;
 }
 
+function renderStaleSummary(staleList){
+  const el = document.getElementById('stale-summary');
+  if(!el) return;
+  if(!staleList.length){ el.innerHTML = ''; return; }
+  // nunca respondeu primeiro, depois por ordem decrescente de dias sem resposta
+  const sorted = staleList.slice().sort((a, b) => {
+    if(a.sinceDays === null && b.sinceDays === null) return 0;
+    if(a.sinceDays === null) return -1;
+    if(b.sinceDays === null) return 1;
+    return b.sinceDays - a.sinceDays;
+  });
+  const chips = sorted.map(s => `<span class="stale-chip">${escapeHtml(s.name)} · <span class="days">${s.sinceDays === null ? 'nunca respondeu' : `${s.sinceDays} dia(s)`}</span></span>`).join('');
+  el.innerHTML = `<div class="stale-summary">
+    <p class="title">⚠ ${staleList.length} atleta(s) sem resposta recente ao formulário diário</p>
+    <div class="stale-list">${chips}</div>
+  </div>`;
+}
+
 function render(){
   const content = document.getElementById('content');
   if(athletes.length === 0){
@@ -729,9 +768,11 @@ function render(){
       <p>Ainda não tens nenhuma atleta registada.</p>
       <button class="btn-primary" onclick="openModal()">+ Adicionar a primeira atleta</button>
     </div>`;
+    renderStaleSummary([]);
     return;
   }
 
+  const staleList = [];
   let html = '<div class="grid">';
   athletes.forEach(a => {
     const hArr = history[a.name.trim().toLowerCase()];
@@ -739,6 +780,7 @@ function render(){
     const lastDate = hLast ? parseTimestamp(hLast.timestamp) : null;
     const sinceDays = daysSince(lastDate);
     const isStale = sinceDays === null ? !hLast : sinceDays > STALE_DAYS;
+    if(isStale) staleList.push({ name: a.name, sinceDays: hLast ? sinceDays : null });
 
     let metaLine, ringInner, phaseColHTML;
 
@@ -810,6 +852,7 @@ function render(){
   </div>`;
 
   content.innerHTML = html;
+  renderStaleSummary(staleList);
 }
 
 function escapeHtml(s){
