@@ -4,6 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>FC Alverca — Equipa Sénior Feminina · Ciclo &amp; Carga</title>
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<meta name="theme-color" content="#e21b3c">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Ciclo &amp; Carga">
 <style>
   :root{
     --bg: #f3f5fa;
@@ -1156,6 +1164,14 @@ loadData().then(() => {
   // Tenta sincronizar automaticamente ao abrir, sem bloquear a primeira renderização
   setTimeout(() => { syncFromForm().catch(()=>{}); }, 400);
 });
+
+// Regista o service worker (app-shell em cache) para a app poder ser instalada como PWA
+// e abrir mais depressa em redes fracas. Não afeta a sincronização dos dados (ver sw.js).
+if('serviceWorker' in navigator){
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(()=>{});
+  });
+}
 </script>
 </body>
 </html>
