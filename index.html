@@ -743,6 +743,39 @@ function sparklineSVG(entries){
   return `<svg viewBox="0 0 ${totalW} ${maxH}" width="${totalW}" height="${maxH}" style="overflow:visible;">${bars}</svg>`;
 }
 
+// Nomes exatamente como aparecem na lista do formulário diário (pergunta "Nome").
+// Mantém-se manualmente em sincronia com esse formulário — ver README.
+const ROSTER_NAMES = [
+  'Rita Durães', 'Madalena Ferreira', 'Margarida Teles', 'Lara Dias', 'Inês Paiva',
+  'Inês Gonçalves', 'Nádia', 'Íris martins', 'Mariana Mousaco', 'Ana Martins',
+  'Daniela Correia', 'Djamila Gomes', 'Kata Semedo', 'Luisa Fernandes', 'Matilde Teixeira',
+  'Cris Lopes', 'Beatriz faustino', 'Luana Lopes', 'Raquel Santos', 'Rita Teles',
+  'Sofia Abreu', 'Ana Rita', 'Eduarda Szatkowski', 'Lara Perpétua', 'Marta Oliveira',
+  'Virginia Amontao', 'Bruna Silva', 'Eduarda Fernandes'
+];
+
+// Combina as atletas já acompanhadas (vindas do Formulário 1) com a lista completa do
+// formulário diário, para que uma atleta que nunca preencheu o Formulário 1 também apareça
+// no resumo de "sem resposta", em vez de ficar invisível.
+function computeStaleList(){
+  const staleMap = new Map(); // key (nome em minúsculas) -> { name, sinceDays }
+
+  function checkName(key, displayName){
+    if(staleMap.has(key)) return;
+    const hArr = history[key];
+    const hLast = hArr && hArr.length ? hArr[hArr.length - 1] : null;
+    const lastDate = hLast ? parseTimestamp(hLast.timestamp) : null;
+    const sinceDays = daysSince(lastDate);
+    const isStale = sinceDays === null ? !hLast : sinceDays > STALE_DAYS;
+    if(isStale) staleMap.set(key, { name: displayName, sinceDays: hLast ? sinceDays : null });
+  }
+
+  athletes.forEach(a => checkName(a.name.trim().toLowerCase(), a.name));
+  ROSTER_NAMES.forEach(name => checkName(name.trim().toLowerCase(), name));
+
+  return Array.from(staleMap.values());
+}
+
 function renderStaleSummary(staleList){
   const el = document.getElementById('stale-summary');
   if(!el) return;
@@ -768,11 +801,10 @@ function render(){
       <p>Ainda não tens nenhuma atleta registada.</p>
       <button class="btn-primary" onclick="openModal()">+ Adicionar a primeira atleta</button>
     </div>`;
-    renderStaleSummary([]);
+    renderStaleSummary(computeStaleList());
     return;
   }
 
-  const staleList = [];
   let html = '<div class="grid">';
   athletes.forEach(a => {
     const hArr = history[a.name.trim().toLowerCase()];
@@ -780,7 +812,6 @@ function render(){
     const lastDate = hLast ? parseTimestamp(hLast.timestamp) : null;
     const sinceDays = daysSince(lastDate);
     const isStale = sinceDays === null ? !hLast : sinceDays > STALE_DAYS;
-    if(isStale) staleList.push({ name: a.name, sinceDays: hLast ? sinceDays : null });
 
     let metaLine, ringInner, phaseColHTML;
 
@@ -852,7 +883,7 @@ function render(){
   </div>`;
 
   content.innerHTML = html;
-  renderStaleSummary(staleList);
+  renderStaleSummary(computeStaleList());
 }
 
 function escapeHtml(s){
