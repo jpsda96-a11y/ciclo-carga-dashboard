@@ -210,6 +210,33 @@
     padding:5px 10px; border-radius:999px;
   }
   .stale-chip .days{ color:var(--luteal); font-weight:700; }
+  .notes-box{
+    margin-top:8px; padding:8px 10px; border-radius:8px; font-size:12px; line-height:1.4;
+    color:var(--ink); background:var(--card-border); border-left:3px solid var(--accent);
+  }
+  .notes-box b{ font-weight:700; }
+  /* Indicador de resposta no dia de treino (ter/qua/sex): verde = respondeu, vermelho = não respondeu */
+  .train-pill{
+    display:inline-flex; align-items:center; gap:5px; margin-top:4px;
+    font-size:11px; font-weight:700; padding:3px 9px; border-radius:999px; border:1px solid transparent;
+  }
+  .train-pill.ok{ color:#15703d; background:#e3f5ea; border-color:#b9e3c8; }
+  .train-pill.no{ color:#b3162f; background:#fde6ea; border-color:#f4b9c3; }
+  .train-summary{
+    margin-top:14px; padding:14px 16px; border-radius:12px;
+    background:var(--card); border:1px solid var(--card-border);
+  }
+  .train-summary .title{
+    font-size:12px; font-weight:700; letter-spacing:.03em; text-transform:uppercase;
+    color:var(--ink-muted); margin:0 0 8px;
+  }
+  .train-summary .title .ok-n{ color:#15703d; }
+  .train-summary .title .no-n{ color:#b3162f; }
+  .train-chip-no{
+    display:inline-flex; align-items:center; font-size:12px; font-weight:600;
+    color:#b3162f; background:#fde6ea; border:1px solid #f4b9c3;
+    padding:5px 10px; border-radius:999px;
+  }
   .irregular-badge{ color:#8a5f0a; background:#fdf1d8; }
   .ring-wrap.irregular-mark{ display:flex; align-items:center; justify-content:center; border:2px dashed var(--ink-faint); border-radius:50%; }
   .ring-wrap.irregular-mark .n{ color:var(--ink-faint); }
@@ -229,6 +256,7 @@
     </div>
   </header>
   <p class="sync-meta" id="sync-meta"></p>
+  <div id="train-summary"></div>
   <div id="stale-summary"></div>
 
   <div class="divider"></div>
@@ -512,7 +540,9 @@ function processSymptomsRows(rows){
     const idx = {
       timestamp: header.findIndex(h => h.includes('carimbo')),
       name: header.findIndex(h => h.includes('nome')),
-      notes: header.findIndex(h => h.includes('notas')),
+      // No formulário diário esta coluna chama-se "Outros sintomas ou preocupações"; mantemos
+      // também os nomes antigos/alternativos para não partir se o título da pergunta mudar.
+      notes: header.findIndex(h => h.includes('outros sintomas') || h.includes('preocupa') || h.includes('observa') || h.includes('notas')),
       periodToday: header.findIndex(h => h.includes('período hoje') || h.includes('periodo hoje')),
       startDate: header.findIndex(h => h.includes('dia começou') || h.includes('dia comecou') || h.includes('quando começou') || h.includes('quando comecou'))
     };
@@ -899,6 +929,66 @@ function computeStaleList(){
   return Array.from(staleMap.values());
 }
 
+// Dias de treino em que o registo diário é obrigatório: 0=Dom, 1=Seg, 2=Ter, 3=Qua, 4=Qui, 5=Sex, 6=Sáb
+const TRAINING_DAYS = [2, 3, 5];
+const WEEKDAY_ABBR = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+
+function dateKey(d){
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// Dia de treino de referência: hoje, se for dia de treino; senão o último dia de treino que já passou.
+function referenceTrainingDay(now){
+  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  for(let i = 0; i < 7; i++){
+    if(TRAINING_DAYS.includes(d.getDay())){
+      return {
+        key: dateKey(d),
+        isToday: i === 0,
+        label: `${WEEKDAY_ABBR[d.getDay()]} ${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`
+      };
+    }
+    d.setDate(d.getDate() - 1);
+  }
+  return null;
+}
+
+// Respondeu ao registo diário nesse dia (qualquer submissão com carimbo dessa data)?
+function respondedOnDay(hArr, dayKey){
+  if(!hArr || !hArr.length) return false;
+  return hArr.some(e => {
+    const t = parseTimestamp(e.timestamp);
+    return t && dateKey(t) === dayKey;
+  });
+}
+
+function renderTrainSummary(){
+  const el = document.getElementById('train-summary');
+  if(!el) return;
+  const ref = referenceTrainingDay(new Date());
+  if(!ref){ el.innerHTML = ''; return; }
+
+  const names = new Map(); // key -> nome de exibição (junta atletas com cartão + lista completa do formulário)
+  athletes.forEach(a => names.set(a.name.trim().toLowerCase(), a.name));
+  ROSTER_NAMES.forEach(n => { const k = n.trim().toLowerCase(); if(!names.has(k)) names.set(k, n); });
+
+  const missing = [];
+  let okCount = 0;
+  names.forEach((display, key) => {
+    if(respondedOnDay(history[key], ref.key)) okCount++;
+    else missing.push(display);
+  });
+  missing.sort((a, b) => a.localeCompare(b, 'pt', { sensitivity: 'base' }));
+
+  const total = names.size;
+  const when = ref.isToday ? `${ref.label} (hoje)` : ref.label;
+  const chips = missing.map(n => `<span class="train-chip-no">${escapeHtml(n)}</span>`).join('');
+  el.innerHTML = `<div class="train-summary">
+    <p class="title">Treino de ${when} · <span class="ok-n">${okCount} responderam</span> · <span class="no-n">${missing.length} em falta</span> (de ${total})</p>
+    ${missing.length ? `<div class="stale-list">${chips}</div>` : '<div style="font-size:13px; color:#15703d; font-weight:600;">✓ Todas responderam ao registo diário.</div>'}
+  </div>`;
+}
+
 function renderStaleSummary(staleList){
   const el = document.getElementById('stale-summary');
   if(!el) return;
@@ -924,10 +1014,12 @@ function render(){
       <p>Ainda não tens nenhuma atleta registada.</p>
       <button class="btn-primary" onclick="openModal()">+ Adicionar a primeira atleta</button>
     </div>`;
+    renderTrainSummary();
     renderStaleSummary(computeStaleList());
     return;
   }
 
+  const trainRef = referenceTrainingDay(new Date());
   let html = '<div class="grid">';
   const sortedAthletes = athletes.slice().sort((a, b) => a.name.trim().localeCompare(b.name.trim(), 'pt', { sensitivity: 'base' }));
   sortedAthletes.forEach(a => {
@@ -991,6 +1083,9 @@ function render(){
           <div>
             <p class="name">${escapeHtml(a.name)}<span class="source-tag">${hLast ? 'FORMS' : ''}</span></p>
             <p class="meta">${metaLine}</p>
+            ${trainRef ? (respondedOnDay(hArr, trainRef.key)
+              ? `<span class="train-pill ok" title="Respondeu ao registo diário no treino de ${trainRef.label}">✓ Respondeu · ${trainRef.label}</span>`
+              : `<span class="train-pill no" title="Não respondeu ao registo diário no treino de ${trainRef.label}">✕ Sem resposta · ${trainRef.label}</span>`) : ''}
           </div>
         </div>
         <button class="icon-btn" onclick="openModal('${a.id}')" aria-label="Editar">✎</button>
@@ -1003,7 +1098,7 @@ function render(){
       ${hLast ? `<div class="history">
         <div><b>Últimos sintomas reportados</b>${hLast.timestamp ? ' · ' + escapeHtml(hLast.timestamp) : ''}</div>
         ${symptomTableHTML(hLast.selected)}
-        ${hLast.notes ? `<div style="margin-top:6px; font-size:12px; color:var(--ink-muted);">"${escapeHtml(hLast.notes)}"</div>` : ''}
+        ${hLast.notes ? `<div class="notes-box"><b>💬 Outros sintomas / preocupações:</b> ${escapeHtml(hLast.notes)}</div>` : ''}
         ${hArr.length > 1 ? `<div class="spark-row">${sparklineSVG(hArr)}</div>
         <div style="margin-top:2px; color:var(--ink-faint); font-size:10px;">Intensidade máxima reportada nas últimas ${hArr.length} respostas</div>` : ''}
       </div>` : ''}
@@ -1019,6 +1114,7 @@ function render(){
   </div>`;
 
   content.innerHTML = html;
+  renderTrainSummary();
   renderStaleSummary(computeStaleList());
 }
 
