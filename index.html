@@ -865,8 +865,8 @@ function sparklineSVG(entries){
 // Mantém-se manualmente em sincronia com esse formulário — ver README.
 const ROSTER_NAMES = [
   'Ana Martins', 'Beatriz faustino', 'Bruna Silva', 'Cris Lopes', 'Daniela Correia',
-  'Djamila Gomes', 'Eduarda Fernandes', 'Eduarda Szatkowski', 'Inês Gonçalves', 'Inês Paiva',
-  'Íris martins', 'Kata Semedo', 'Lara Dias', 'Lara Perpétua', 'Luana Lopes',
+  'Djamila Gomes', 'Eduarda Szatkowski', 'Inês Gonçalves', 'Inês Paiva',
+  'Íris martins', 'Kata Semedo', 'Lara Dias', 'Luana Lopes',
   'Luisa Fernandes', 'Madalena Ferreira', 'Margarida Teles', 'Mariana Mousaco', 'Marta Oliveira',
   'Matilde Teixeira', 'Nádia', 'Raquel Santos', 'Rita Durães', 'Rita Teles',
   'Sofia Abreu', 'Virginia Amontao'
@@ -875,7 +875,7 @@ const ROSTER_NAMES = [
 // Atletas que já não devem ser acompanhadas (ex.: saíram do plantel) mas que, por preencherem
 // ou terem preenchido algum dos formulários, poderiam voltar a aparecer sozinhas. Qualquer
 // nome aqui é sempre removido ao carregar/sincronizar, independentemente da fonte dos dados.
-const REMOVED_NAMES = ['Ana Rita'];
+const REMOVED_NAMES = ['Ana Rita', 'Eduarda Fernandes', 'Lara Perpétua'];
 
 function isRemovedName(name){
   const key = name.trim().toLowerCase();
@@ -929,7 +929,8 @@ function computeStaleList(){
   return Array.from(staleMap.values());
 }
 
-// Dias de treino em que o registo diário é obrigatório: 0=Dom, 1=Seg, 2=Ter, 3=Qua, 4=Qui, 5=Sex, 6=Sáb
+// Dias de treino/jogo em que o registo diário é obrigatório: 0=Dom, 1=Seg, 2=Ter, 3=Qua, 4=Qui, 5=Sex, 6=Sáb
+// Ter, Qua e Sex = treino; Dom = jogo.
 const TRAINING_DAYS = [0, 2, 3, 5];
 const WEEKDAY_ABBR = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 
@@ -984,7 +985,7 @@ function renderTrainSummary(){
   const when = ref.isToday ? `${ref.label} (hoje)` : ref.label;
   const chips = missing.map(n => `<span class="train-chip-no">${escapeHtml(n)}</span>`).join('');
   el.innerHTML = `<div class="train-summary">
-    <p class="title">Treino de ${when} · <span class="ok-n">${okCount} responderam</span> · <span class="no-n">${missing.length} em falta</span> (de ${total})</p>
+    <p class="title">${ref.label.startsWith('Dom') ? 'Jogo' : 'Treino'} de ${when} · <span class="ok-n">${okCount} responderam</span> · <span class="no-n">${missing.length} em falta</span> (de ${total})</p>
     ${missing.length ? `<div class="stale-list">${chips}</div>` : '<div style="font-size:13px; color:#15703d; font-weight:600;">✓ Todas responderam ao registo diário.</div>'}
   </div>`;
 }
