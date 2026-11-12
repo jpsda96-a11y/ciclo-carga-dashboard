@@ -864,9 +864,9 @@ function sparklineSVG(entries){
 // Nomes exatamente como aparecem na lista do formulário diário (pergunta "Nome").
 // Mantém-se manualmente em sincronia com esse formulário — ver README.
 const ROSTER_NAMES = [
-  'Ana Martins', 'Beatriz faustino', 'Bruna Silva', 'Cris Lopes', 'Daniela Correia',
+  'Ana Martins', 'Beatriz faustino', 'Cris Lopes', 'Daniela Correia',
   'Djamila Gomes', 'Eduarda Szatkowski', 'Inês Gonçalves', 'Inês Paiva',
-  'Íris martins', 'Kata Semedo', 'Lara Dias', 'Luana Lopes',
+  'Íris martins', 'Kata Semedo', 'Luana Lopes',
   'Luisa Fernandes', 'Madalena Ferreira', 'Margarida Teles', 'Mariana Mousaco', 'Marta Oliveira',
   'Matilde Teixeira', 'Nádia', 'Raquel Santos', 'Rita Durães', 'Rita Teles',
   'Sofia Abreu', 'Virginia Amontao'
@@ -875,7 +875,7 @@ const ROSTER_NAMES = [
 // Atletas que já não devem ser acompanhadas (ex.: saíram do plantel) mas que, por preencherem
 // ou terem preenchido algum dos formulários, poderiam voltar a aparecer sozinhas. Qualquer
 // nome aqui é sempre removido ao carregar/sincronizar, independentemente da fonte dos dados.
-const REMOVED_NAMES = ['Ana Rita', 'Eduarda Fernandes', 'Lara Perpétua'];
+const REMOVED_NAMES = ['Ana Rita', 'Eduarda Fernandes', 'Lara Perpétua', 'Lara Dias', 'Bruna Silva'];
 
 function isRemovedName(name){
   const key = name.trim().toLowerCase();
