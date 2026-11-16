@@ -689,7 +689,29 @@ function finalizeCycleStats(){
       a.periodLength = Math.max(1, Math.round(avgPeriod));
     }
   });
+
+  // Estimativas provisórias definidas manualmente (1 só intervalo entre inícios de período
+  // detetado nas respostas diárias — o cálculo automático exige 3 inícios). Só se aplicam
+  // enquanto não houver estatística automática; assim que a atleta tiver 3 inícios, o cálculo
+  // real passa a mandar. Sempre tratadas como ciclo regular (não há variação para medir).
+  Object.keys(CYCLE_OVERRIDES).forEach(key => {
+    const a = athletes.find(x => x.name.trim().toLowerCase() === key);
+    if(!a || a.cycleStats) return;
+    const o = CYCLE_OVERRIDES[key];
+    a.cycleLength = o.cycleLength;
+    a.lastStart = o.lastStart;
+    if(!(Number.isFinite(a.periodLength) && a.periodLength > 0)) a.periodLength = DEFAULT_PERIOD_LENGTH;
+    a.isIrregular = false;
+  });
 }
+
+const DEFAULT_PERIOD_LENGTH = 5; // duração do período usada quando ainda não há dados reais
+const CYCLE_OVERRIDES = {
+  'djamila gomes':      { cycleLength: 29, lastStart: '2026-11-05' }, // 07/10 → 05/11
+  'eduarda szatkowski': { cycleLength: 29, lastStart: '2026-11-02' }, // 04/10 → 02/11
+  'raquel santos':      { cycleLength: 23, lastStart: '2026-10-20' }, // 27/09 → 20/10
+  'rita teles':         { cycleLength: 29, lastStart: '2026-10-26' }  // 27/09 → 26/10
+};
 
 async function syncFromForm(){
   const btn = document.getElementById('sync-btn');
