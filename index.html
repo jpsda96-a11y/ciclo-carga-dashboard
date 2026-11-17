@@ -296,7 +296,8 @@ const PHASES = {
 
 const CYCLE_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRxOL9gP9q2i3x8QO-_7TzMZTWxTBf3g-nsnPmcXOAdgu0N8nd0J6vqDb8pODiAVdSvfMPTTg43nnLN/pub?output=csv';
 const SYMPTOMS_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQ4IFQLQbvE8LjNU8QMDBOseYUgMzPiQBUJw0M9PSbpNz5n3Xvxb6xwy6zuUz-yFPjMPDv2jjZzURu6/pub?output=csv';
-const RPE_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQt-r7pNi9wa07DfvMlPKLpqdOfytC6fA5MXc__8vBPNrhwbZFZ3VMS1TIw0AQMODAA_I8uqUbCLP9x/pub?output=csv';
+const GAME_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQZP0gb-A_dsgtQf3XaFmcq-AFFzDNtcEvkvaUwqmA3sPtdMpCmipgsFxf7_e9LypwnFj7cls3rkfHy/pub?output=csv';
+const RPE_CSV_URL ='https://docs.google.com/spreadsheets/d/e/2PACX-1vQt-r7pNi9wa07DfvMlPKLpqdOfytC6fA5MXc__8vBPNrhwbZFZ3VMS1TIw0AQMODAA_I8uqUbCLP9x/pub?output=csv';
 const PHOTO_CSV_URL ='https://docs.google.com/spreadsheets/d/e/2PACX-1vRrJ4IgG7ml5XJJiekZaW9EPTuIzNDLqVUIV1mw7eRJAPBO5Mu7gL1adwzWSuqm3YF8QBvz4SpZczRK/pub?output=csv';
 const STALE_DAYS = 3;
 // Se a diferença entre o ciclo mais curto e mais longo (nas últimas submissões) for >= a isto, tratamos o ciclo como irregular
@@ -310,7 +311,8 @@ let rpeData = {}; // name (lowercase) -> array de { ts, day, rpe } (reconstruíd
 // Carga (UA) = RPE × minutos. Treinos: 90 min fixos. Jogos (domingo): minutos fornecidos pela equipa
 // técnica em GAME_MINUTES, chave 'AAAA-MM-DD|nome em minúsculas' → minutos; sem dado usa 90 e marca "(min. por confirmar)".
 const TRAINING_MINUTES = 90;
-const GAME_MINUTES = {};
+let GAME_MINUTES = {}; // preenchido a cada sincronização a partir do formulário da equipa técnica
+let gameDays = {};     // 'AAAA-MM-DD' -> true (jogos para os quais a equipa técnica já registou minutos)
 // Estados temporários de cada sincronização, usados só para calcular o ciclo a partir
 // do histórico completo (Formulário 1, preenchido uma única vez, + Formulário diário).
 let cycleStartsFromForm1 = new Map(); // key -> string[] (datas ISO)
@@ -572,8 +574,33 @@ function processRpeRows(rows){
   return n;
 }
 
+// Minutos de jogo (formulário da equipa técnica): 1 linha por jogo, 1 coluna por atleta, em branco = não jogou (0).
+function processGameRows(rows){
+  GAME_MINUTES = {}; gameDays = {};
+  if(!rows || rows.length < 2) return 0;
+  const header = rows[0].map(h => h.trim().toLowerCase());
+  const iDate = header.findIndex(h => h.includes('data do jogo'));
+  if(iDate < 0) return 0;
+  let n = 0;
+  for(let r = 1; r < rows.length; r++){
+    const raw = (rows[r][iDate] || '').trim();
+    let day = null, m;
+    if((m = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/))) day = raw;
+    else if((m = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/))) day = `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;
+    if(!day) continue;
+    gameDays[day] = true;
+    header.forEach((h, c) => {
+      if(c === iDate || h.includes('carimbo')) return;
+      const v = parseInt((rows[r][c] || '').trim(), 10);
+      GAME_MINUTES[day + '|' + h] = (v >= 0 && v <= 150) ? v : 0;
+      n++;
+    });
+  }
+  return n;
+}
+
 function rpeLoad(entry, key){
-  const gm = GAME_MINUTES[entry.day + '|' + key];
+  const gm = GAME_MINUTES[entry.day + '|' + key] != null ? GAME_MINUTES[entry.day + '|' + key] : (gameDays[entry.day] ? 0 : undefined);
   const isSunday = new Date(entry.ts).getDay() === 0;
   const minutes = gm != null ? gm : TRAINING_MINUTES;
   return { load: entry.rpe * minutes, minutes, isGame: isSunday, provisional: isSunday && gm == null };
@@ -818,6 +845,12 @@ async function syncFromForm(){
       const rows = await fetchCSV(RPE_CSV_URL);
       processRpeRows(rows);
     }catch(e){ /* falha nesta fonte não bloqueia as outras */ }
+
+    // 2c) Minutos de jogo preenchidos pela equipa técnica
+    try{
+      const rows = await fetchCSV(GAME_CSV_URL);
+      processGameRows(rows);
+    }catch(e){ /* sem dados de jogo: usa 90 min provisórios */ }
 
     // Remove sempre quem já não deve ser acompanhada (ver REMOVED_NAMES), mesmo que tenha
     // voltado a aparecer numa das sheets.
