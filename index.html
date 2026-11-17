@@ -297,7 +297,7 @@ const PHASES = {
 const CYCLE_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRxOL9gP9q2i3x8QO-_7TzMZTWxTBf3g-nsnPmcXOAdgu0N8nd0J6vqDb8pODiAVdSvfMPTTg43nnLN/pub?output=csv';
 const SYMPTOMS_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQ4IFQLQbvE8LjNU8QMDBOseYUgMzPiQBUJw0M9PSbpNz5n3Xvxb6xwy6zuUz-yFPjMPDv2jjZzURu6/pub?output=csv';
 const GAME_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQZP0gb-A_dsgtQf3XaFmcq-AFFzDNtcEvkvaUwqmA3sPtdMpCmipgsFxf7_e9LypwnFj7cls3rkfHy/pub?output=csv';
-const RPE_CSV_URL ='https://docs.google.com/spreadsheets/d/e/2PACX-1vQt-r7pNi9wa07DfvMlPKLpqdOfytC6fA5MXc__8vBPNrhwbZFZ3VMS1TIw0AQMODAA_I8uqUbCLP9x/pub?output=csv';
+const PSE_CSV_URL ='https://docs.google.com/spreadsheets/d/e/2PACX-1vQt-r7pNi9wa07DfvMlPKLpqdOfytC6fA5MXc__8vBPNrhwbZFZ3VMS1TIw0AQMODAA_I8uqUbCLP9x/pub?output=csv';
 const PHOTO_CSV_URL ='https://docs.google.com/spreadsheets/d/e/2PACX-1vRrJ4IgG7ml5XJJiekZaW9EPTuIzNDLqVUIV1mw7eRJAPBO5Mu7gL1adwzWSuqm3YF8QBvz4SpZczRK/pub?output=csv';
 const STALE_DAYS = 3;
 // Se a diferença entre o ciclo mais curto e mais longo (nas últimas submissões) for >= a isto, tratamos o ciclo como irregular
@@ -307,8 +307,8 @@ let athletes = [];
 let editingId = null;
 let history = {}; // name (lowercase) -> array of { symptoms, notes, timestamp, count }
 let lastSync = null;
-let rpeData = {}; // name (lowercase) -> array de { ts, day, rpe } (reconstruído a cada sincronização)
-// Carga (UA) = RPE × minutos. Treinos: 90 min fixos. Jogos (domingo): minutos fornecidos pela equipa
+let pseData = {}; // name (lowercase) -> array de { ts, day, pse } (reconstruído a cada sincronização)
+// Carga (UA) = PSE × minutos. Treinos: 90 min fixos. Jogos (domingo): minutos fornecidos pela equipa
 // técnica em GAME_MINUTES, chave 'AAAA-MM-DD|nome em minúsculas' → minutos; sem dado usa 90 e marca "(min. por confirmar)".
 const TRAINING_MINUTES = 90;
 let GAME_MINUTES = {}; // preenchido a cada sincronização a partir do formulário da equipa técnica
@@ -388,7 +388,7 @@ async function loadData(){
     if(res2 && res2.value){
       const parsed = JSON.parse(res2.value);
       history = parsed.history || {};
-      rpeData = parsed.rpeData || {};
+      pseData = parsed.pseData || {};
       lastSync = parsed.lastSync || null;
     }
   }catch(e){
@@ -406,7 +406,7 @@ async function loadData(){
 
 async function saveSyncState(){
   try{
-    await storageSet('ciclo-sync', JSON.stringify({ history, rpeData, lastSync }));
+    await storageSet('ciclo-sync', JSON.stringify({ history, pseData, lastSync }));
   }catch(e){
     // non-fatal
   }
@@ -550,27 +550,27 @@ function detectPeriodStartsFromDaily(dayEntries){
   return { starts, streakLengths };
 }
 
-function processRpeRows(rows){
+function processPseRows(rows){
   if(!rows || rows.length < 2) return 0;
   const header = rows[0].map(h => h.trim().toLowerCase());
   const iName = header.findIndex(h => h.includes('nome'));
-  const iRpe = header.findIndex(h => h.includes('esforço') || h.includes('esforco'));
+  const iPse = header.findIndex(h => h.includes('esforço') || h.includes('esforco'));
   const iTs = header.findIndex(h => h.includes('carimbo') || h.includes('timestamp'));
-  if(iName < 0 || iRpe < 0 || iTs < 0) return 0;
+  if(iName < 0 || iPse < 0 || iTs < 0) return 0;
   const out = {};
   let n = 0;
   for(let i = 1; i < rows.length; i++){
     const r = rows[i];
     const name = (r[iName] || '').trim();
-    const rpe = parseInt((r[iRpe] || '').trim(), 10);
+    const pse = parseInt((r[iPse] || '').trim(), 10);
     const t = parseTimestamp(r[iTs]);
-    if(!name || !t || !(rpe >= 1 && rpe <= 10)) continue;
+    if(!name || !t || !(pse >= 1 && pse <= 10)) continue;
     const key = name.toLowerCase();
-    (out[key] = out[key] || []).push({ ts: t.getTime(), day: dateKey(t), rpe });
+    (out[key] = out[key] || []).push({ ts: t.getTime(), day: dateKey(t), pse });
     n++;
   }
   Object.keys(out).forEach(k => out[k].sort((a, b) => a.ts - b.ts));
-  rpeData = out;
+  pseData = out;
   return n;
 }
 
@@ -599,33 +599,33 @@ function processGameRows(rows){
   return n;
 }
 
-function rpeLoad(entry, key){
+function pseLoad(entry, key){
   const gm = GAME_MINUTES[entry.day + '|' + key] != null ? GAME_MINUTES[entry.day + '|' + key] : (gameDays[entry.day] ? 0 : undefined);
   const isSunday = new Date(entry.ts).getDay() === 0;
   const minutes = gm != null ? gm : TRAINING_MINUTES;
-  return { load: entry.rpe * minutes, minutes, isGame: isSunday, provisional: isSunday && gm == null };
+  return { load: entry.pse * minutes, minutes, isGame: isSunday, provisional: isSunday && gm == null };
 }
 
-// Último RPE e carga acumulada nos últimos 7 dias (UA), com aviso quando a semana sobe muito
+// Último PSE e carga acumulada nos últimos 7 dias (UA), com aviso quando a semana sobe muito
 // face à média das 3 semanas anteriores.
-function rpeHTML(key){
-  const arr = rpeData[key];
+function pseHTML(key){
+  const arr = pseData[key];
   if(!arr || !arr.length) return '';
   const last = arr[arr.length - 1];
   const DAY = 86400000, now = Date.now();
   let week = 0, prev = 0, prov = false;
   arr.forEach(e => {
     const age = (now - e.ts) / DAY;
-    const l = rpeLoad(e, key);
+    const l = pseLoad(e, key);
     if(age <= 7){ week += l.load; if(l.provisional) prov = true; }
     else if(age <= 28) prev += l.load;
   });
   const prevAvg = prev / 3;
   const spike = prevAvg > 0 && week > prevAvg * 1.5;
-  const level = last.rpe >= 8 ? 'bad' : (last.rpe >= 6 ? 'mid' : 'ok');
+  const level = last.pse >= 8 ? 'bad' : (last.pse >= 6 ? 'mid' : 'ok');
   return `<div class="wb-row" style="margin-top:8px;">
-      <span class="wb-chip ${level}" title="Último RPE (1–10) · ${escapeHtml(last.day)}">💪 RPE ${last.rpe}/10</span>
-      <span class="wb-chip ok" title="RPE × minutos, últimos 7 dias${prov ? ' (jogo com minutos por confirmar: 90)' : ''}">📊 Carga 7d: ${week} UA${prov ? '*' : ''}</span>
+      <span class="wb-chip ${level}" title="Último PSE (1–10) · ${escapeHtml(last.day)}">💪 PSE ${last.pse}/10</span>
+      <span class="wb-chip ok" title="PSE × minutos, últimos 7 dias${prov ? ' (jogo com minutos por confirmar: 90)' : ''}">📊 Carga 7d: ${week} UA${prov ? '*' : ''}</span>
     </div>${spike ? '<div class="wb-alert">⚠ Carga desta semana &gt;150% da média das 3 anteriores</div>' : ''}`;
 }
 
@@ -840,10 +840,10 @@ async function syncFromForm(){
       symptomsUpdated = processSymptomsRows(rows);
     }catch(e){ /* falha nesta fonte não bloqueia a outra */ }
 
-    // 2b) Esforço percebido (RPE) pós-treino/jogo
+    // 2b) Esforço percebido (PSE) pós-treino/jogo
     try{
-      const rows = await fetchCSV(RPE_CSV_URL);
-      processRpeRows(rows);
+      const rows = await fetchCSV(PSE_CSV_URL);
+      processPseRows(rows);
     }catch(e){ /* falha nesta fonte não bloqueia as outras */ }
 
     // 2c) Minutos de jogo preenchidos pela equipa técnica
@@ -1273,7 +1273,7 @@ function render(){
         ${hArr.length > 1 ? `<div class="spark-row">${sparklineSVG(hArr)}</div>
         <div style="margin-top:2px; color:var(--ink-faint); font-size:10px;">Intensidade máxima reportada nas últimas ${hArr.length} respostas</div>` : ''}
       </div>` : ''}
-      ${rpeHTML(a.name.trim().toLowerCase())}
+      ${pseHTML(a.name.trim().toLowerCase())}
     </div>`;
   });
   html += '</div>';
