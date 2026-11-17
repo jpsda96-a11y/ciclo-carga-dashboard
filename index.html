@@ -215,6 +215,16 @@
     color:var(--ink); background:var(--card-border); border-left:3px solid var(--accent);
   }
   .notes-box b{ font-weight:700; }
+  .wb-row{ display:flex; flex-wrap:wrap; gap:6px; margin:8px 0 4px; }
+  .wb-chip{
+    font-size:11px; font-weight:700; padding:3px 9px; border-radius:999px; border:1px solid transparent;
+  }
+  .wb-chip.ok{ color:#15703d; background:#e3f5ea; border-color:#b9e3c8; }
+  .wb-chip.mid{ color:#8a5f0a; background:#fdf1d8; border-color:#f0d9a3; }
+  .wb-chip.bad{ color:#b3162f; background:#fde6ea; border-color:#f4b9c3; }
+  .wb-alert{
+    margin:4px 0; font-size:12px; font-weight:600; color:#b3162f;
+  }
   /* Indicador de resposta no dia de treino (ter/qua/sex): verde = respondeu, vermelho = não respondeu */
   .train-pill{
     display:inline-flex; align-items:center; gap:5px; margin-top:4px;
@@ -286,7 +296,8 @@ const PHASES = {
 
 const CYCLE_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRxOL9gP9q2i3x8QO-_7TzMZTWxTBf3g-nsnPmcXOAdgu0N8nd0J6vqDb8pODiAVdSvfMPTTg43nnLN/pub?output=csv';
 const SYMPTOMS_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQ4IFQLQbvE8LjNU8QMDBOseYUgMzPiQBUJw0M9PSbpNz5n3Xvxb6xwy6zuUz-yFPjMPDv2jjZzURu6/pub?output=csv';
-const PHOTO_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRrJ4IgG7ml5XJJiekZaW9EPTuIzNDLqVUIV1mw7eRJAPBO5Mu7gL1adwzWSuqm3YF8QBvz4SpZczRK/pub?output=csv';
+const RPE_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQt-r7pNi9wa07DfvMlPKLpqdOfytC6fA5MXc__8vBPNrhwbZFZ3VMS1TIw0AQMODAA_I8uqUbCLP9x/pub?output=csv';
+const PHOTO_CSV_URL ='https://docs.google.com/spreadsheets/d/e/2PACX-1vRrJ4IgG7ml5XJJiekZaW9EPTuIzNDLqVUIV1mw7eRJAPBO5Mu7gL1adwzWSuqm3YF8QBvz4SpZczRK/pub?output=csv';
 const STALE_DAYS = 3;
 // Se a diferença entre o ciclo mais curto e mais longo (nas últimas submissões) for >= a isto, tratamos o ciclo como irregular
 const IRREGULAR_THRESHOLD_DAYS = 7;
@@ -295,6 +306,11 @@ let athletes = [];
 let editingId = null;
 let history = {}; // name (lowercase) -> array of { symptoms, notes, timestamp, count }
 let lastSync = null;
+let rpeData = {}; // name (lowercase) -> array de { ts, day, rpe } (reconstruído a cada sincronização)
+// Carga (UA) = RPE × minutos. Treinos: 90 min fixos. Jogos (domingo): minutos fornecidos pela equipa
+// técnica em GAME_MINUTES, chave 'AAAA-MM-DD|nome em minúsculas' → minutos; sem dado usa 90 e marca "(min. por confirmar)".
+const TRAINING_MINUTES = 90;
+const GAME_MINUTES = {};
 // Estados temporários de cada sincronização, usados só para calcular o ciclo a partir
 // do histórico completo (Formulário 1, preenchido uma única vez, + Formulário diário).
 let cycleStartsFromForm1 = new Map(); // key -> string[] (datas ISO)
@@ -370,6 +386,7 @@ async function loadData(){
     if(res2 && res2.value){
       const parsed = JSON.parse(res2.value);
       history = parsed.history || {};
+      rpeData = parsed.rpeData || {};
       lastSync = parsed.lastSync || null;
     }
   }catch(e){
@@ -387,7 +404,7 @@ async function loadData(){
 
 async function saveSyncState(){
   try{
-    await storageSet('ciclo-sync', JSON.stringify({ history, lastSync }));
+    await storageSet('ciclo-sync', JSON.stringify({ history, rpeData, lastSync }));
   }catch(e){
     // non-fatal
   }
@@ -531,6 +548,60 @@ function detectPeriodStartsFromDaily(dayEntries){
   return { starts, streakLengths };
 }
 
+function processRpeRows(rows){
+  if(!rows || rows.length < 2) return 0;
+  const header = rows[0].map(h => h.trim().toLowerCase());
+  const iName = header.findIndex(h => h.includes('nome'));
+  const iRpe = header.findIndex(h => h.includes('esforço') || h.includes('esforco'));
+  const iTs = header.findIndex(h => h.includes('carimbo') || h.includes('timestamp'));
+  if(iName < 0 || iRpe < 0 || iTs < 0) return 0;
+  const out = {};
+  let n = 0;
+  for(let i = 1; i < rows.length; i++){
+    const r = rows[i];
+    const name = (r[iName] || '').trim();
+    const rpe = parseInt((r[iRpe] || '').trim(), 10);
+    const t = parseTimestamp(r[iTs]);
+    if(!name || !t || !(rpe >= 1 && rpe <= 10)) continue;
+    const key = name.toLowerCase();
+    (out[key] = out[key] || []).push({ ts: t.getTime(), day: dateKey(t), rpe });
+    n++;
+  }
+  Object.keys(out).forEach(k => out[k].sort((a, b) => a.ts - b.ts));
+  rpeData = out;
+  return n;
+}
+
+function rpeLoad(entry, key){
+  const gm = GAME_MINUTES[entry.day + '|' + key];
+  const isSunday = new Date(entry.ts).getDay() === 0;
+  const minutes = gm != null ? gm : TRAINING_MINUTES;
+  return { load: entry.rpe * minutes, minutes, isGame: isSunday, provisional: isSunday && gm == null };
+}
+
+// Último RPE e carga acumulada nos últimos 7 dias (UA), com aviso quando a semana sobe muito
+// face à média das 3 semanas anteriores.
+function rpeHTML(key){
+  const arr = rpeData[key];
+  if(!arr || !arr.length) return '';
+  const last = arr[arr.length - 1];
+  const DAY = 86400000, now = Date.now();
+  let week = 0, prev = 0, prov = false;
+  arr.forEach(e => {
+    const age = (now - e.ts) / DAY;
+    const l = rpeLoad(e, key);
+    if(age <= 7){ week += l.load; if(l.provisional) prov = true; }
+    else if(age <= 28) prev += l.load;
+  });
+  const prevAvg = prev / 3;
+  const spike = prevAvg > 0 && week > prevAvg * 1.5;
+  const level = last.rpe >= 8 ? 'bad' : (last.rpe >= 6 ? 'mid' : 'ok');
+  return `<div class="wb-row" style="margin-top:8px;">
+      <span class="wb-chip ${level}" title="Último RPE (1–10) · ${escapeHtml(last.day)}">💪 RPE ${last.rpe}/10</span>
+      <span class="wb-chip ok" title="RPE × minutos, últimos 7 dias${prov ? ' (jogo com minutos por confirmar: 90)' : ''}">📊 Carga 7d: ${week} UA${prov ? '*' : ''}</span>
+    </div>${spike ? '<div class="wb-alert">⚠ Carga desta semana &gt;150% da média das 3 anteriores</div>' : ''}`;
+}
+
 function processSymptomsRows(rows){
   let updated = 0;
   cycleStartsFromForm2 = new Map();
@@ -544,7 +615,10 @@ function processSymptomsRows(rows){
       // também os nomes antigos/alternativos para não partir se o título da pergunta mudar.
       notes: header.findIndex(h => h.includes('outros sintomas') || h.includes('preocupa') || h.includes('observa') || h.includes('notas')),
       periodToday: header.findIndex(h => h.includes('período hoje') || h.includes('periodo hoje')),
-      startDate: header.findIndex(h => h.includes('dia começou') || h.includes('dia comecou') || h.includes('quando começou') || h.includes('quando comecou'))
+      startDate: header.findIndex(h => h.includes('dia começou') || h.includes('dia comecou') || h.includes('quando começou') || h.includes('quando comecou')),
+      // Escalas 1–5 acrescentadas ao formulário diário em novembro (respostas antigas ficam vazias)
+      sleep: header.findIndex(h => h.includes('dormiste') || h.includes('sono')),
+      stress: header.findIndex(h => h.includes('stress'))
     };
     // Colunas da grelha vêm como "Sintomas hoje [Nome do sintoma]" com o valor 1-10 (ou vazio)
     const symptomCols = [];
@@ -578,7 +652,14 @@ function processSymptomsRows(rows){
       const selectedSorted = selected.slice().sort((a, b) => b.value - a.value);
 
       if(!history[key]) history[key] = [];
-      history[key].push({ symptoms, notes, timestamp, count: maxIntensity, selected: selectedSorted, periodToday });
+      const parseScale = idxCol => {
+        if(idxCol < 0) return null;
+        const v = parseInt((r[idxCol] || '').trim(), 10);
+        return (v >= 1 && v <= 5) ? v : null;
+      };
+      const sleep = parseScale(idx.sleep);
+      const stress = parseScale(idx.stress);
+      history[key].push({ symptoms, notes, timestamp, count: maxIntensity, selected: selectedSorted, periodToday, sleep, stress });
       if(history[key].length > 8) history[key] = history[key].slice(-8);
 
       if(periodToday){
@@ -731,6 +812,12 @@ async function syncFromForm(){
       const rows = await fetchCSV(SYMPTOMS_CSV_URL);
       symptomsUpdated = processSymptomsRows(rows);
     }catch(e){ /* falha nesta fonte não bloqueia a outra */ }
+
+    // 2b) Esforço percebido (RPE) pós-treino/jogo
+    try{
+      const rows = await fetchCSV(RPE_CSV_URL);
+      processRpeRows(rows);
+    }catch(e){ /* falha nesta fonte não bloqueia as outras */ }
 
     // Remove sempre quem já não deve ser acompanhada (ver REMOVED_NAMES), mesmo que tenha
     // voltado a aparecer numa das sheets.
@@ -985,6 +1072,33 @@ function respondedOnDay(hArr, dayKey){
   });
 }
 
+// Sono (1 = muito mal … 5 = muito bem) e stress (1 = nada … 5 = muito) da última resposta, com
+// cor por nível, e aviso quando o sono está baixo ou o stress alto em várias respostas seguidas.
+const WELLBEING_STREAK = 3;      // nº de respostas seguidas (com o dado preenchido) para disparar o aviso
+const SLEEP_LOW_MAX = 2;         // sono <= 2 conta como "baixo"
+const STRESS_HIGH_MIN = 4;       // stress >= 4 conta como "alto"
+
+function wellbeingStreak(hArr, field, test){
+  const vals = hArr.map(e => e[field]).filter(v => v !== null && v !== undefined);
+  if(vals.length < WELLBEING_STREAK) return false;
+  return vals.slice(-WELLBEING_STREAK).every(test);
+}
+
+function wellbeingHTML(hArr){
+  if(!hArr || !hArr.length) return '';
+  const last = hArr[hArr.length - 1];
+  if(last.sleep == null && last.stress == null) return '';
+  const sleepLevel = last.sleep == null ? '' : (last.sleep <= SLEEP_LOW_MAX ? 'bad' : (last.sleep === 3 ? 'mid' : 'ok'));
+  const stressLevel = last.stress == null ? '' : (last.stress >= STRESS_HIGH_MIN ? 'bad' : (last.stress === 3 ? 'mid' : 'ok'));
+  const chips = [];
+  if(last.sleep != null) chips.push(`<span class="wb-chip ${sleepLevel}" title="1 = muito mal, 5 = muito bem">😴 Sono ${last.sleep}/5</span>`);
+  if(last.stress != null) chips.push(`<span class="wb-chip ${stressLevel}" title="1 = nada stressada, 5 = muito stressada">🧠 Stress ${last.stress}/5</span>`);
+  const alerts = [];
+  if(wellbeingStreak(hArr, 'sleep', v => v <= SLEEP_LOW_MAX)) alerts.push(`⚠ Sono baixo nas últimas ${WELLBEING_STREAK} respostas`);
+  if(wellbeingStreak(hArr, 'stress', v => v >= STRESS_HIGH_MIN)) alerts.push(`⚠ Stress alto nas últimas ${WELLBEING_STREAK} respostas`);
+  return `<div class="wb-row">${chips.join('')}</div>${alerts.map(t => `<div class="wb-alert">${t}</div>`).join('')}`;
+}
+
 function renderTrainSummary(){
   const el = document.getElementById('train-summary');
   if(!el) return;
@@ -1120,11 +1234,13 @@ function render(){
       ${isStale ? `<div class="warn-badge">⚠ ${hLast ? `sem resposta há ${sinceDays} dia(s)` : 'nunca respondeu ao formulário'}</div>` : ''}
       ${hLast ? `<div class="history">
         <div><b>Últimos sintomas reportados</b>${hLast.timestamp ? ' · ' + escapeHtml(hLast.timestamp) : ''}</div>
+        ${wellbeingHTML(hArr)}
         ${symptomTableHTML(hLast.selected)}
         ${hLast.notes ? `<div class="notes-box"><b>💬 Outros sintomas / preocupações:</b> ${escapeHtml(hLast.notes)}</div>` : ''}
         ${hArr.length > 1 ? `<div class="spark-row">${sparklineSVG(hArr)}</div>
         <div style="margin-top:2px; color:var(--ink-faint); font-size:10px;">Intensidade máxima reportada nas últimas ${hArr.length} respostas</div>` : ''}
       </div>` : ''}
+      ${rpeHTML(a.name.trim().toLowerCase())}
     </div>`;
   });
   html += '</div>';
