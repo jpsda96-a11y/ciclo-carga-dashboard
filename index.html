@@ -1119,6 +1119,17 @@ function respondedOnDay(hArr, dayKey){
   });
 }
 
+// ---------- Alerta de PSE em falta ----------
+// A PSE preenche-se no fim do treino/jogo: se o dia de referência é hoje, só se alerta a partir das 20:00.
+const PSE_ALERT_HOUR = 20;
+function pseAlertActive(ref, now){
+  return !!ref && (!ref.isToday || now.getHours() >= PSE_ALERT_HOUR);
+}
+function pseRespondedOnDay(key, dayKey){
+  const arr = pseData[key];
+  return !!(arr && arr.some(e => e.day === dayKey));
+}
+
 // ---------- Ausências (marcadas pela equipa técnica) ----------
 // Cada marcação é enviada para um formulário Google só da equipa técnica (data, atleta, tipo) e lida
 // de volta pela folha publicada, para que toda a equipa veja o mesmo em qualquer dispositivo.
@@ -1285,6 +1296,17 @@ function renderTrainSummary(){
   missing.sort((a, b) => a.localeCompare(b, 'pt', { sensitivity: 'base' }));
   absent.sort((a, b) => a.name.localeCompare(b.name, 'pt', { sensitivity: 'base' }));
 
+  // PSE em falta (quem não está ausente e não preencheu a PSE desse dia)
+  const noPse = [];
+  if(pseAlertActive(ref, new Date())){
+    names.forEach((display, key) => {
+      if(absenceOn(ref.key, key)) return;
+      if(!pseRespondedOnDay(key, ref.key)) noPse.push(display);
+    });
+    noPse.sort((a, b) => a.localeCompare(b, 'pt', { sensitivity: 'base' }));
+  }
+  const pseChips = noPse.map(n => `<span class="train-chip-no">${escapeHtml(n)}</span>`).join('');
+
   const total = names.size;
   const when = ref.isToday ? `${ref.label} (hoje)` : ref.label;
   const chips = missing.map(n => `<span class="train-chip-no">${escapeHtml(n)}</span>`).join('');
@@ -1293,6 +1315,7 @@ function renderTrainSummary(){
     <p class="title">${ref.label.startsWith('Dom') ? 'Jogo' : 'Treino'} de ${when} · <span class="ok-n">${okCount} responderam</span> · <span class="no-n">${missing.length} em falta</span>${absent.length ? ` · ${absent.length} ausente(s)` : ''} (de ${total})</p>
     ${missing.length ? `<div class="stale-list">${chips}</div>` : '<div style="font-size:13px; color:#15703d; font-weight:600;">✓ Todas responderam ao registo diário.</div>'}
     ${absent.length ? `<div class="stale-list" style="margin-top:6px;">${absChips}</div>` : ''}
+    ${noPse.length ? `<p class="title" style="margin-top:10px;">⚠ Não responderam à PSE · <span class="no-n">${noPse.length}</span></p><div class="stale-list">${pseChips}</div>` : ''}
   </div>`;
 }
 
@@ -1395,6 +1418,10 @@ function render(){
               : (absenceOn(trainRef.key, a.name.trim().toLowerCase())
                 ? `<span class="train-pill abs" title="Marcada pela equipa técnica">⦸ ${escapeHtml(absenceOn(trainRef.key, a.name.trim().toLowerCase()))} · ${trainRef.label}</span>`
                 : `<span class="train-pill no" title="Não respondeu ao registo diário no treino de ${trainRef.label}">✕ Sem resposta · ${trainRef.label}</span>`)) : ''}
+            ${trainRef && pseAlertActive(trainRef, new Date()) && !absenceOn(trainRef.key, a.name.trim().toLowerCase())
+              ? (pseRespondedOnDay(a.name.trim().toLowerCase(), trainRef.key)
+                ? `<span class="train-pill ok" title="Respondeu à PSE de ${trainRef.label}">✓ PSE · ${trainRef.label}</span>`
+                : `<span class="train-pill no" title="Não respondeu à PSE de ${trainRef.label}">✕ Não respondeu à PSE · ${trainRef.label}</span>`) : ''}
           </div>
         </div>
         <button class="icon-btn" onclick="openModal('${a.id}')" aria-label="Editar">✎</button>
