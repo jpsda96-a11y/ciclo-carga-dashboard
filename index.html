@@ -232,6 +232,11 @@
   }
   .train-pill.ok{ color:#15703d; background:#e3f5ea; border-color:#b9e3c8; }
   .train-pill.no{ color:#b3162f; background:#fde6ea; border-color:#f4b9c3; }
+  .train-pill.abs{ color:#55556b; background:#ececf1; border-color:#d3d3dc; }
+  .train-chip-abs{ display:inline-block; font-size:12px; font-weight:600; color:#55556b; background:#ececf1; border:1px solid #d3d3dc; border-radius:999px; padding:3px 10px; margin:2px 4px 2px 0; }
+  .abs-list{ max-height:260px; overflow:auto; border:1px solid var(--line, #e3e5ee); border-radius:10px; padding:6px 10px; margin-top:6px; }
+  .abs-list label{ display:flex; align-items:center; gap:8px; padding:5px 0; font-size:14px; cursor:pointer; }
+  .abs-list label.done{ color:#8a8aa0; cursor:default; }
   .train-summary{
     margin-top:14px; padding:14px 16px; border-radius:12px;
     background:var(--card); border:1px solid var(--card-border);
@@ -261,6 +266,7 @@
       <p class="sub">Acompanha em que fase do ciclo cada atleta se encontra para ajustar volume e intensidade de treino.</p>
     </div>
     <div style="display:flex; gap:10px; align-items:center;">
+      <button class="btn-ghost" onclick="openAbsenceModal()">🚫 Marcar ausências</button>
       <button class="btn-ghost" id="sync-btn" onclick="syncFromForm()">⟳ Sincronizar</button>
       <button class="btn-primary" onclick="openModal()">+ Adicionar atleta</button>
     </div>
@@ -389,6 +395,8 @@ async function loadData(){
       const parsed = JSON.parse(res2.value);
       history = parsed.history || {};
       pseData = parsed.pseData || {};
+      absences = parsed.absences || {};
+      pendingAbsences = parsed.pendingAbsences || {};
       lastSync = parsed.lastSync || null;
     }
   }catch(e){
@@ -406,7 +414,7 @@ async function loadData(){
 
 async function saveSyncState(){
   try{
-    await storageSet('ciclo-sync', JSON.stringify({ history, pseData, lastSync }));
+    await storageSet('ciclo-sync', JSON.stringify({ history, pseData, absences, pendingAbsences, lastSync }));
   }catch(e){
     // non-fatal
   }
@@ -852,6 +860,12 @@ async function syncFromForm(){
       processGameRows(rows);
     }catch(e){ /* sem dados de jogo: usa 90 min provisórios */ }
 
+    // 2d) Ausências marcadas pela equipa técnica
+    try{
+      const rows = await fetchCSV(ABSENCE_CSV_URL);
+      processAbsenceRows(rows);
+    }catch(e){ /* mantém as ausências já conhecidas */ }
+
     // Remove sempre quem já não deve ser acompanhada (ver REMOVED_NAMES), mesmo que tenha
     // voltado a aparecer numa das sheets.
     athletes = athletes.filter(a => !isRemovedName(a.name));
@@ -1105,6 +1119,121 @@ function respondedOnDay(hArr, dayKey){
   });
 }
 
+// ---------- Ausências (marcadas pela equipa técnica) ----------
+// Cada marcação é enviada para um formulário Google só da equipa técnica (data, atleta, tipo) e lida
+// de volta pela folha publicada, para que toda a equipa veja o mesmo em qualquer dispositivo.
+const ABSENCE_FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLSdi4t-fdtjjrdgsR2fPTTdoVxMmaRLOlJmclrcJej83AhV2mg/formResponse';
+const ABSENCE_ENTRY = { date: 'entry.859567814', athlete: 'entry.1260647848', type: 'entry.1446965930' };
+const ABSENCE_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSddo2iAFmL-84TWukgg8Qrqz1s5npyEs69kM9hjHjWnba3MX9iv9jSysouj3ThJcr3r3eb9Z9M38kM/pub?output=csv';
+const ABSENCE_TYPES = ['Falta', 'Não convocada'];
+const PENDING_ABSENCE_MS = 2 * 3600 * 1000; // marcação local mantém-se até a folha publicada a refletir (ou 2 h)
+let absences = {};        // 'AAAA-MM-DD|nome em minúsculas' -> tipo (vindo da folha)
+let pendingAbsences = {}; // idem -> { type, at } (enviadas deste dispositivo, ainda não vistas na folha)
+
+function absenceOn(day, key){
+  const k = day + '|' + key;
+  if(absences[k]) return absences[k];
+  const p = pendingAbsences[k];
+  return p ? p.type : null;
+}
+
+function processAbsenceRows(rows){
+  absences = {};
+  if(rows && rows.length >= 2){
+    const header = rows[0].map(h => h.trim().toLowerCase());
+    const iDate = header.findIndex(h => h === 'data');
+    const iName = header.findIndex(h => h.includes('atleta'));
+    const iType = header.findIndex(h => h === 'tipo');
+    if(iDate >= 0 && iName >= 0 && iType >= 0){
+      for(let r = 1; r < rows.length; r++){
+        const raw = (rows[r][iDate] || '').trim();
+        const name = (rows[r][iName] || '').trim().toLowerCase();
+        const type = (rows[r][iType] || '').trim();
+        let day = null, m;
+        if(/^\d{4}-\d{2}-\d{2}$/.test(raw)) day = raw;
+        else if((m = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/))) day = `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;
+        if(!day || !name || !type) continue;
+        absences[day + '|' + name] = type;
+      }
+    }
+  }
+  const now = Date.now();
+  Object.keys(pendingAbsences).forEach(k => {
+    if(absences[k] || now - pendingAbsences[k].at > PENDING_ABSENCE_MS) delete pendingAbsences[k];
+  });
+}
+
+function openAbsenceModal(){
+  const ref = referenceTrainingDay(new Date());
+  const day = ref ? ref.key : dateKey(new Date());
+  const root = document.getElementById('modal-root');
+  root.innerHTML = `
+  <div class="overlay" onclick="if(event.target===this) closeModal()">
+    <div class="modal">
+      <h2>Marcar ausências</h2>
+      <p class="msub">Escolhe o dia e quem faltou. As atletas marcadas deixam de contar como "sem resposta" nesse dia.</p>
+      <div class="field-row">
+        <div class="field">
+          <label for="abs-date">Dia</label>
+          <input id="abs-date" type="date" value="${day}" onchange="renderAbsenceList()">
+        </div>
+        <div class="field">
+          <label for="abs-type">Tipo</label>
+          <select id="abs-type">${ABSENCE_TYPES.map(t => `<option value="${t}">${t}</option>`).join('')}</select>
+        </div>
+      </div>
+      <div class="abs-list" id="abs-list"></div>
+      <p class="msub" style="margin-top:8px;">Para corrigir uma marcação enviada por engano, apaga a linha na folha de respostas do formulário "Ausências — equipa técnica".</p>
+      <div class="modal-actions">
+        <button class="btn-ghost" onclick="closeModal()">Cancelar</button>
+        <button class="btn-primary" id="abs-submit" onclick="submitAbsences()">Registar ausências</button>
+      </div>
+    </div>
+  </div>`;
+  renderAbsenceList();
+}
+
+function renderAbsenceList(){
+  const dayEl = document.getElementById('abs-date');
+  const listEl = document.getElementById('abs-list');
+  if(!dayEl || !listEl) return;
+  const day = dayEl.value;
+  const names = ROSTER_NAMES.slice().sort((a, b) => a.localeCompare(b, 'pt', { sensitivity: 'base' }));
+  listEl.innerHTML = names.map(n => {
+    const done = day ? absenceOn(day, n.trim().toLowerCase()) : null;
+    return `<label class="${done ? 'done' : ''}"><input type="checkbox" class="abs-cb" value="${escapeHtml(n)}" ${done ? 'disabled checked' : ''}> ${escapeHtml(n)}${done ? ' · ' + escapeHtml(done) : ''}</label>`;
+  }).join('');
+}
+
+async function submitAbsences(){
+  const day = (document.getElementById('abs-date') || {}).value;
+  const type = (document.getElementById('abs-type') || {}).value || ABSENCE_TYPES[0];
+  const names = Array.from(document.querySelectorAll('.abs-cb:checked:not(:disabled)')).map(x => x.value);
+  if(!day){ showToast('Escolhe o dia.'); return; }
+  if(!names.length){ showToast('Seleciona pelo menos uma atleta.'); return; }
+  const btn = document.getElementById('abs-submit');
+  if(btn){ btn.disabled = true; btn.textContent = 'A registar…'; }
+  const [y, m, d] = day.split('-');
+  let ok = 0;
+  for(const n of names){
+    const body = new URLSearchParams();
+    body.set(ABSENCE_ENTRY.date + '_year', String(+y));
+    body.set(ABSENCE_ENTRY.date + '_month', String(+m));
+    body.set(ABSENCE_ENTRY.date + '_day', String(+d));
+    body.set(ABSENCE_ENTRY.athlete, n);
+    body.set(ABSENCE_ENTRY.type, type);
+    try{
+      await fetch(ABSENCE_FORM_URL, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body });
+      pendingAbsences[day + '|' + n.trim().toLowerCase()] = { type, at: Date.now() };
+      ok++;
+    }catch(e){ /* sem ligação: esta atleta não foi registada */ }
+  }
+  await saveSyncState();
+  closeModal();
+  render();
+  showToast(ok === names.length ? `${ok} ausência(s) registada(s).` : `Só ${ok} de ${names.length} registadas — verifica a ligação e tenta de novo.`);
+}
+
 // Sono (1 = muito mal … 5 = muito bem) e stress (1 = nada … 5 = muito) da última resposta, com
 // cor por nível, e aviso quando o sono está baixo ou o stress alto em várias respostas seguidas.
 const WELLBEING_STREAK = 3;      // nº de respostas seguidas (com o dado preenchido) para disparar o aviso
@@ -1143,19 +1272,27 @@ function renderTrainSummary(){
   ROSTER_NAMES.forEach(n => { const k = n.trim().toLowerCase(); if(!names.has(k)) names.set(k, n); });
 
   const missing = [];
+  const absent = []; // { name, type } — marcadas pela equipa técnica e sem resposta nesse dia
   let okCount = 0;
   names.forEach((display, key) => {
     if(respondedOnDay(history[key], ref.key)) okCount++;
-    else missing.push(display);
+    else {
+      const abs = absenceOn(ref.key, key);
+      if(abs) absent.push({ name: display, type: abs });
+      else missing.push(display);
+    }
   });
   missing.sort((a, b) => a.localeCompare(b, 'pt', { sensitivity: 'base' }));
+  absent.sort((a, b) => a.name.localeCompare(b.name, 'pt', { sensitivity: 'base' }));
 
   const total = names.size;
   const when = ref.isToday ? `${ref.label} (hoje)` : ref.label;
   const chips = missing.map(n => `<span class="train-chip-no">${escapeHtml(n)}</span>`).join('');
+  const absChips = absent.map(a => `<span class="train-chip-abs">${escapeHtml(a.name)} · ${escapeHtml(a.type)}</span>`).join('');
   el.innerHTML = `<div class="train-summary">
-    <p class="title">${ref.label.startsWith('Dom') ? 'Jogo' : 'Treino'} de ${when} · <span class="ok-n">${okCount} responderam</span> · <span class="no-n">${missing.length} em falta</span> (de ${total})</p>
+    <p class="title">${ref.label.startsWith('Dom') ? 'Jogo' : 'Treino'} de ${when} · <span class="ok-n">${okCount} responderam</span> · <span class="no-n">${missing.length} em falta</span>${absent.length ? ` · ${absent.length} ausente(s)` : ''} (de ${total})</p>
     ${missing.length ? `<div class="stale-list">${chips}</div>` : '<div style="font-size:13px; color:#15703d; font-weight:600;">✓ Todas responderam ao registo diário.</div>'}
+    ${absent.length ? `<div class="stale-list" style="margin-top:6px;">${absChips}</div>` : ''}
   </div>`;
 }
 
@@ -1255,7 +1392,9 @@ function render(){
             <p class="meta">${metaLine}</p>
             ${trainRef ? (respondedOnDay(hArr, trainRef.key)
               ? `<span class="train-pill ok" title="Respondeu ao registo diário no treino de ${trainRef.label}">✓ Respondeu · ${trainRef.label}</span>`
-              : `<span class="train-pill no" title="Não respondeu ao registo diário no treino de ${trainRef.label}">✕ Sem resposta · ${trainRef.label}</span>`) : ''}
+              : (absenceOn(trainRef.key, a.name.trim().toLowerCase())
+                ? `<span class="train-pill abs" title="Marcada pela equipa técnica">⦸ ${escapeHtml(absenceOn(trainRef.key, a.name.trim().toLowerCase()))} · ${trainRef.label}</span>`
+                : `<span class="train-pill no" title="Não respondeu ao registo diário no treino de ${trainRef.label}">✕ Sem resposta · ${trainRef.label}</span>`)) : ''}
           </div>
         </div>
         <button class="icon-btn" onclick="openModal('${a.id}')" aria-label="Editar">✎</button>
